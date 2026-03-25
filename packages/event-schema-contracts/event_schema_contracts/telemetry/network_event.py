@@ -3,7 +3,6 @@ from typing import Union, ClassVar
 from uuid import UUID
 from enum import Enum
 from ipaddress import IPv4Address, IPv6Address
-
 from pydantic import Field
 
 from event_schema_contracts.base.base_event import BaseEvent
@@ -54,24 +53,22 @@ class NetworkConnectionPayload(DomainEventPayload):
     latency_ms: float | None = Field(
         None,
         ge=0,
+        le=60_000
         description="Observed connection latency"
     )
 
     direction: ConnectionDirection
 
-class NetworkConnectionEvent(
-    BaseEvent[NetworkConnectionPayload]
-):
+# Schema identity
+EVENT_TYPE = "network.connection"
+SCHEMA_VERSION_V1 = "v1"
+
+class NetworkConnectionEvent(BaseEvent[NetworkConnectionPayload]):
     """
+    network.connection v1
+
     Canonical network connection telemetry contract.
     """
 
-    metadata: EventMetadata = Field(
-        default_factory=lambda: EventMetadata(
-            schema_version="v1",
-            event_type="network.connection",
-            source="unknown"
-        )
-    )
-
-    trace: TraceContext
+    __event_type__ = EVENT_TYPE
+    __schema_version__ = SCHEMA_VERSION_V1

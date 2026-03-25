@@ -6,14 +6,13 @@ from enum import Enum
 from pydantic import Field
 
 from event_schema_contracts.base.base_event import BaseEvent
-from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.base.domain import DomainEventPayload
 
 class DeviceType(str, Enum):
     SENSOR = "SENSOR"
     GATEWAY = "GATEWAY"
-    EDGE_NODE = "NODE"
+    EDGE_NODE = "EDGE_NODE"
 
 class DeviceRegistrationPayload(DomainEventPayload):
     """
@@ -45,19 +44,17 @@ class DeviceRegistrationPayload(DomainEventPayload):
         description="Timestamp when device completed registration."
     )
 
-class DeviceRegistrationEvent(
-    BaseEvent[DeviceRegistrationPayload]
-):
-    """
-    Canonical device registration event contract.
-    """
+# Schema identity
+EVENT_TYPE = "device.registration"
+SCHEMA_VERSION_V1 = "v1"
 
-    metadata: EventMetadata = Field(
-        default_factory=lambda: EventMetadata(
-            schema_version="v1",
-            event_type="device.registration",
-            source="unknown"
-        )
-    )
-        
-    trace: TraceContext
+class DeviceRegistrationEvent(BaseEvent[DeviceRegistrationPayload]):
+    """
+    device.registration v1
+
+    Canonical device registration event contract.
+
+    Metadata is auto injected from schema identity.
+    """
+    __event_type__ = EVENT_TYPE
+    __schema_version__ = SCHEMA_VERSION_V1

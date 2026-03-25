@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import ClassVar
 from uuid import UUID
-
 from pydantic import Field
 
 from event_schema_contracts.base.base_event import BaseEvent
@@ -40,22 +39,19 @@ class SessionStartPayload(DomainEventPayload):
 
     client_version: str | None = Field(
         None,
+        pattern=r"^\d+\.\d+\.\d+$",
         description="Client software version"
     )
 
-class SessionStartEvent(
-    BaseEvent[SessionStartPayload]
-):
+# Schema identity
+EVENT_TYPE = "session.start"
+SCHEMA_VERSION_V1 = "v1"
+
+class SessionStartEvent(BaseEvent[SessionStartPayload]):
     """
+    session.start v1
+
     Canonical session start telemetry contract.
     """
-
-    metadata: EventMetadata = Field(
-        default_factory=lambda: EventMetadata(
-            schema_version="v1",
-            event_type="session.start",
-            source="unknown"
-        )
-    )
-
-    trace: TraceContext
+    __event_type__ = EVENT_TYPE
+    __schema_version__ = SCHEMA_VERSION_V1
