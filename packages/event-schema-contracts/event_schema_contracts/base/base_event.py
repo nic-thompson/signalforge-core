@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 
+from event_schema_contracts.versioning.schema_registry import schema_registry
+
 PayloadT = TypeVar("PayloadT")
 
 class BaseEvent(BaseModel, Generic[PayloadT]):
@@ -21,6 +23,45 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
     - dataset reproducibility guaruntees
     - pipeline observability compatibility
     """
+
+    __event_type__: ClassVar[str]
+    __schema_version__: ClassVar[str]
+
+    model_config = {
+        "validate_assignment": True,
+        "frozen": True
+    }
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        if cls is BaseEvent:
+            return
+        
+        if not hasattr(cls, "__event_type__"):
+            raise TypeError(f"{cls.__name__} missing __event_type__")
+        
+        if not hasattr(cls, "__schema_version__"):
+            raise TypeError(f"{cls.__name__} missing __schema_version__")
+        
+        meta = getattr(cls, "__pydantic_generic_metadata__", None)
+        
+        if not meta or not meta.get("args"):
+            raise TypeError(
+                f"{cls.__name__} must specify payload type BaseEvent[Payload]"
+            )
+
+        try:
+            schema_registry.register(
+                cls.__event_type__,
+                cls.__schema_version__,
+                cls,
+            )
+        except ValueError as exc:
+            raise TypeError(
+                f"{cls.__name__} duplicates schema identity "
+                f"{cls.__event_type__} {cls.__schema_version__} "
+            ) from exc
 
     event_id: UUID = Field(
         default_factory=uuid4,
