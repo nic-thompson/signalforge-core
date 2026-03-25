@@ -11,6 +11,8 @@ from event_schema_contracts.versioning.schema_registry import schema_registry
 
 PayloadT = TypeVar("PayloadT")
 
+MAX_CLOCK_SKEW = timedelta(minutes=5)
+
 class BaseEvent(BaseModel, Generic[PayloadT]):
     """
     Canonical event envelope shared across all telemetry schemas.
@@ -108,9 +110,58 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
         return value
     
     @model_validator(mode="after")
-    def validate_timestamp_order(self):
-        if self.ingest_timestamp < self.event_timestamp:
+    def validate_model(self):
+        if self.ingest_timestamp + MAX_CLOCK_SKEW < self.event_timestamp:
             raise ValueError(
                 "ingest_timestamp cannot be earlier than event_timestamp"
             )
+    
+        if self.metadata.event_type != self.__event_type__:
+            raise ValueError("metadata.event_type mismatch")
+        
+        if self.metadata.schema_version != self.__schema_version__:
+            raise ValueError("metadata.schema_version mismatch")
+
+        meta = getattr(self.__class__,"__pydantic_generic_metadata__", None)
+
+        if meta:
+            expected = meta.get("args")
+            
+            if expected:
+                expected_type = expected[0]
+
+                if not isinstance(self.payload, expected_type):
+                    raise TypeError("payload type mismatch") 
+        
         return self
+    
+    @model_validator(mode="before")
+    @classmethod
+    def inject_metadata(cls, data):
+        
+        if not isinstance(data, dict):
+            return data
+        
+        metadata = data.get("metadata")
+
+        if metadata is None:
+            data["metadata"] = EventMetadata(
+                schema_version=cls.__schema_version__,
+                event_type=cls.__event_type__,
+                source="unknown",
+            )
+        else:
+            if isinstance(metadata, dict):
+                event_type = metadata.get("event_type")
+                schema_version = metadata.get("schema_version")
+            else:
+                event_type = metadata.event_type
+                schema_version = metadata.schema_version
+
+            if (
+                event_type != cls.__event_type__
+                or schema_version != cls.__schema_version__
+            ):
+                raise ValueError("metadata does not match schema identity")
+
+        return data
