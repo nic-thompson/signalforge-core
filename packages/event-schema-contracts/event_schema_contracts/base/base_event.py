@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
-from typing import Generic, TypeVar
+from datetime import datetime, timezone, timedelta
+from typing import Generic, TypeVar, ClassVar
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
