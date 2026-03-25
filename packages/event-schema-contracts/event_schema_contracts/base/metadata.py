@@ -1,4 +1,8 @@
 from pydantic import BaseModel, Field, field_validator
+import re
+
+SEMVER_PATTERN = re.compile(r"^v\d+(\.\d+)*$")
+EVENT_TYPE_PATTERN = re.compile(r"^[a-z0-9]+(\.[a-z0-9]+)+$")
 
 class EventMetadata(BaseModel):
     """
@@ -23,9 +27,23 @@ class EventMetadata(BaseModel):
         description="Originating service emitting the event"
     )
 
+    model_config = {
+        "frozen": True,
+        "extra": "forbid"
+    }
+
     @field_validator("schema_version")
     @classmethod
     def validate_schema_version(cls, value: str) -> str:
-        if not value.startswith("v"):
+        if not SEMVER_PATTERN.match(value):
             raise ValueError("schema version must start with 'v'")
+        return value
+    
+    @field_validator("event_type")
+    @classmethod
+    def validate_event_type(cls, value: str) -> str:
+        if not EVENT_TYPE_PATTERN.match(value):
+            raise ValueError(
+                "event_type must follow dotted lowercase format like device.registration"
+            )
         return value
