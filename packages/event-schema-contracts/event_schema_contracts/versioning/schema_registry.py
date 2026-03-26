@@ -3,6 +3,10 @@ from typing import Dict, Tuple, Type, Any
 from pydantic import ValidationError
 
 from event_schema_contracts.base.base_event import BaseEvent
+from event_schema_contracts.versioning.compatibility import (
+    ensure_compatibility, 
+    parse_version
+)
 
 SchemaKey = Tuple[str, str]
 
@@ -57,16 +61,44 @@ class SchemaRegistry:
     ) -> Type[BaseEvent[Any]]:
         """
         Resolve schema class for event_type + version.
+
+        Support forward-compatible fallback lookup using the
+        closest available compatible schema version.
         """
 
         key = (event_type, schema_version)
 
-        if key not in self._registry:
-            raise KeyError(
-                f"No schema registered for {event_type} {schema_version}"
-            )
+        if key in self._registry:
+            return self._registry[key]
         
-        return self._registry[key]
+        # attempt compatible fallback
+        compatible_versions = []
+
+        requested = parse_version(schema_version)
+
+        for (etype, version) in self._registry.keys():
+            if etype != event_type:
+                continue
+
+            candidate = parse_version(version)
+
+            if candidate.major != requested.major:
+                continue
+
+            try:
+                ensure_compatibility(schema_version, version)
+                if candidate >= requested:
+                    compatible_versions.append((candidate, version))
+            except ValueError:
+                continue
+
+        if compatible_versions:
+            closest = min(compatible_versions, key=lambda item: item[0])[1]
+            return self._registry[(event_type, closest)]
+        
+        raise KeyError(
+            f"No compatible schema registered for {event_type} {schema_version}"
+        )
     
     def validate(
             self, 
