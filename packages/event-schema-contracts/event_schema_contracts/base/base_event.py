@@ -37,7 +37,7 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
 
-        if cls is BaseEvent:
+        if cls is BaseEvent or cls.__name__.startswith("BaseEvent["):
             return
         
         if not hasattr(cls, "__event_type__"):
