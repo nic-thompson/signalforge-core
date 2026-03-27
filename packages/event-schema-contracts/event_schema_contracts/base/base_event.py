@@ -165,3 +165,16 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
                 raise ValueError("metadata does not match schema identity")
 
         return data
+    
+    @model_validator(mode="after")
+    def enforce_schema_identity(self):
+
+        if hasattr(self, "__event_type__"):
+            if self.metadata.event_type != self.__event_type__:
+                raise ValueError("event_type mismatch with schema definition")
+
+        if hasattr(self, "__schema_version__"):
+            if self.metadata.schema_version != self.__schema_version__:
+                raise ValueError("schema_version mismatch with schema definition")
+
+        return self
