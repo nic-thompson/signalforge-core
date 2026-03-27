@@ -2,7 +2,10 @@ from typing import Dict, Tuple, Type, Any
 
 from pydantic import ValidationError
 
-from event_schema_contracts.base.base_event import BaseEvent
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from event_schema_contracts.base.base_event import BaseEvent
 from event_schema_contracts.versioning.compatibility import (
     ensure_compatibility, 
     parse_version
@@ -25,7 +28,7 @@ class SchemaRegistry:
     def __init__(self) -> None:
         self._registry: Dict[
             SchemaKey, 
-            Type[BaseEvent[Any]]
+            Type["BaseEvent[Any]"]
         ] = {}
 
     def is_registered(
@@ -39,7 +42,7 @@ class SchemaRegistry:
             self,
             event_type: str,
             schema_version: str,
-            schema: Type[BaseEvent[Any]],
+            schema: Type["BaseEvent[Any]"],
     ) -> None:
         """
         Register schema for event_type + version.
@@ -58,7 +61,7 @@ class SchemaRegistry:
             self,
             event_type: str,
             schema_version: str,
-    ) -> Type[BaseEvent[Any]]:
+    ) -> Type["BaseEvent[Any]"]:
         """
         Resolve schema class for event_type + version.
 
@@ -103,7 +106,7 @@ class SchemaRegistry:
     def validate(
             self, 
             event: Dict[str, Any],
-    ) -> BaseEvent[Any]:
+    ) -> "BaseEvent[Any]":
         """
         Validate raw event dict against registered schema.
         
@@ -149,7 +152,7 @@ class SchemaRegistry:
             if etype == event_type
         )
     
-    def list_registered(self) -> Dict[SchemaKey, Type[BaseEvent[Any]]]:
+    def list_registered(self) -> Dict[SchemaKey, Type["BaseEvent[Any]"]]:
         return dict(self._registry)
         
 schema_registry = SchemaRegistry()
