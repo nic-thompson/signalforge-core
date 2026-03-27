@@ -1,2 +1,29 @@
-changes.patch
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+
+# Editor settings
+.vscode/
+.idea/
+
+# OS files
 .DS_Store
+
+# Git Diff
+changes.patch
