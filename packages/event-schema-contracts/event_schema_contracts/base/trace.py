@@ -1,7 +1,15 @@
-from typing import Optional
-from uuid import UUID
+from enum import Enum
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
+
+class PipelineStage(str, Enum):
+    INGESTION = "ingestion"
+    VALIDATION = "validation"
+    ENRICHMENT = "enrichment"
+    FEATURE_BUILDING = "feature_building"
+    EXPORT = "export"
+    INFERENCE = "inference"
 
 class TraceContext(BaseModel):
     """
@@ -12,16 +20,16 @@ class TraceContext(BaseModel):
     """
 
     trace_id: UUID = Field(
-        ...,
+        default_factory=uuid4,
         description="Global trace identifier shared across pipeline stages"
     )
 
-    parent_trace_id: Optional[UUID] = Field(
-        None,
-        description="Parent trace identifier if derived from upstream event"
+    root_trace_id: UUID = Field(
+        default_factory=uuid4,
+        description="Root lineage identifier for replay tracking"
     )
 
-    pipeline_stage: Optional[str] = Field(
-        None,
-        description="Pipeline processing stage (ingestion, validation, enrichment, feature_building, export)"
+    pipeline_stage: PipelineStage = Field(
+        default=PipelineStage.INGESTION,
+        description="Pipeline processing stage"
     )
