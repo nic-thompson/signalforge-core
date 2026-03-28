@@ -87,3 +87,12 @@ def test_metadata_schema_identity_mismatch():
             event_timestamp=datetime.now(timezone.utc),
             payload={"key": "value"}
         )
+
+def test_metadata_auto_injected():
+    event = DummyEvent(
+        trace=TraceContext(trace_id=uuid4()),
+        event_timestamp=datetime.now(timezone.utc),
+        payload={"key": "value"},
+    )
+
+    assert event.metadata.event_type == "test.event"
