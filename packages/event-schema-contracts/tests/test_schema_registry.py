@@ -24,3 +24,16 @@ def test_lookup_returns_expected_schema_class():
     )
 
     assert schema is DeviceRegistrationEvent
+
+
+def test_lookup_returns_class_not_instance():
+    """
+    Registry must return schema *type* not instance.
+    """
+
+    schema = schema_registry.get_schema(
+        "device.registration",
+        "v1",
+    )
+
+    assert isinstance(schema, type)
