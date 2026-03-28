@@ -62,4 +62,21 @@ def test_lookup_unknown_version_raises():
             "device.registration",
             "v999",
         )
-        
+
+
+# -------------------------------
+# Schema identity consistency
+# -------------------------------
+
+def test_schema_event_type_matches_registry_key():
+    """
+    Schema metadata must match registry key.
+    Prevents silent mismatches.
+    """
+
+    schema = schema_registry.get_schema(
+        "device.registration",
+        "v1",
+    )
+
+    assert schema.__event_type__ == "device.registration"
