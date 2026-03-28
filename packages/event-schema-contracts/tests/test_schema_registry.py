@@ -80,3 +80,17 @@ def test_schema_event_type_matches_registry_key():
     )
 
     assert schema.__event_type__ == "device.registration"
+
+
+def test_schema_version_matches_registry_key():
+    """
+    Schema version metadata must match
+    registry lookup version.
+    """
+
+    schema = schema_registry.get_schema(
+        "device.registration",
+        "v1",
+    )
+
+    assert schema.__schema_version__ == "v1"
