@@ -94,3 +94,17 @@ def test_schema_version_matches_registry_key():
     )
 
     assert schema.__schema_version__ == "v1"
+
+
+    # ----------------------------------
+    # Registry structural guarantees 
+    # ----------------------------------
+
+def test_registry_contains_expected_schema():
+    """
+    Registry must expose expected mapping internally.
+    Guards accidental deregistration.
+    """
+
+    assert ("device.registration", "v1",) in schema_registry._registry
+
