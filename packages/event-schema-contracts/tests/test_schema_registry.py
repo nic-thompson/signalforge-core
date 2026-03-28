@@ -37,3 +37,15 @@ def test_lookup_returns_class_not_instance():
     )
 
     assert isinstance(schema, type)
+
+
+def test_lookup_unknown_event_type_raises():
+    """
+    Unknown event types must fail clearly
+    """
+
+    with pytest.raises(KeyError):
+        schema_registry.get_schema(
+            "device.unknown",
+            "v1",
+        )
