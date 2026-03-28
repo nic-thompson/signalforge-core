@@ -28,3 +28,16 @@ def test_valid_base_event_creation():
 
     assert event.event_id is not None
     assert event.metadata.event_type == "test.event"
+
+def test_event_timestamp_requires_timezone():
+    with pytest.raises(ValueError):
+        DummyEvent(
+            metadata=EventMetadata(
+                schema_version="v1",
+                event_type="test.event",
+                source="pytest"
+            ),
+            trace=TraceContext(trace_id=uuid4),
+            event_timestamp=datetime.now(),
+            payload={"key": "value"},
+        )
