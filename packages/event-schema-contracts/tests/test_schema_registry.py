@@ -49,3 +49,17 @@ def test_lookup_unknown_event_type_raises():
             "device.unknown",
             "v1",
         )
+
+
+def test_lookup_unknown_version_raises():
+    """
+    Known event_types with unknown versions
+    must raise KeyError.
+    """
+
+    with pytest.raises(KeyError):
+        schema_registry.get_schema(
+            "device.registration",
+            "v999",
+        )
+        
