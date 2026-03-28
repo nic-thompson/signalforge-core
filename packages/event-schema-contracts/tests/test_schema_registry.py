@@ -108,3 +108,23 @@ def test_registry_contains_expected_schema():
 
     assert ("device.registration", "v1",) in schema_registry._registry
 
+
+def test_registry_maps_to_correct_schema_class():
+    """
+    Internal registry mapping must match public lookup result.
+    """
+
+    internal_schema = schema_registry._registry[
+        (
+            "device.registration",
+            "v1",
+        )
+    ]
+
+    public_schema = schema_registry.get_schema(
+        "device.registration",
+        "v1",
+    )
+
+    assert internal_schema is public_schema
+
