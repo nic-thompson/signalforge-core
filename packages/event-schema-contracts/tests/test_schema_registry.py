@@ -5,6 +5,7 @@ from event_schema_contracts.telemetry.device_event import (
 )
 
 from event_schema_contracts.versioning.schema_registry import (
+    SchemaRegistry,
     schema_registry,
 )
 
@@ -128,3 +129,21 @@ def test_registry_maps_to_correct_schema_class():
 
     assert internal_schema is public_schema
 
+
+# -------------------------------------
+# Duplicate registration protection
+# -------------------------------------
+
+def test_duplicate_schema_registrarion_fails():
+    """
+    Registry must prevent duplicate schema registration
+    """
+
+    registry = schema_registry
+    
+    with pytest.raises(ValueError):
+        registry.register(
+            "device.registration",
+            "v1",
+            DeviceRegistrationEvent,
+        )
