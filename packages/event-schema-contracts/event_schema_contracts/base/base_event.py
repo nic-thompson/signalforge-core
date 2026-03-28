@@ -122,16 +122,6 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
         if self.metadata.schema_version != self.__schema_version__:
             raise ValueError("metadata.schema_version mismatch")
 
-        meta = getattr(self.__class__,"__pydantic_generic_metadata__", None)
-
-        if meta:
-            expected = meta.get("args")
-            
-            if expected:
-                expected_type = expected[0]
-
-                if not isinstance(self.payload, expected_type):
-                    raise TypeError("payload type mismatch") 
         
         return self
     
