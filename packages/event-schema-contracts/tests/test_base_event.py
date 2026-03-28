@@ -7,6 +7,8 @@ from event_schema_contracts.base.base_event import BaseEvent
 from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 
+from pydantic import ValidationError
+
 class DummyPayload:
     pass
 
@@ -37,12 +39,13 @@ def test_event_timestamp_requires_timezone():
                 event_type="test.event",
                 source="pytest"
             ),
-            trace=TraceContext(trace_id=uuid4),
+            trace=TraceContext(trace_id=uuid4()),
             event_timestamp=datetime.now(),
             payload={"key": "value"},
         )
 
 def test_ingest_timestamp_after_event_timestamp():
+    
     ts = datetime.now(timezone.utc)
 
     with pytest.raises(ValueError):
@@ -52,8 +55,21 @@ def test_ingest_timestamp_after_event_timestamp():
                 event_type="test.event",
                 source="pytest"
             ),
-            trace=TraceContext(trace_id=uuid4),
+            trace=TraceContext(trace_id=uuid4()),
             event_timestamp=ts,
             ingest_timestamp=ts.replace(year=ts.year - 1),
             payload={"key": "value"},
+        )
+
+def test_payload_type_enforced():
+    with pytest.raises(ValidationError):
+        DummyEvent(
+            metadata=EventMetadata(
+                schema_version="v1",
+                event_type="test.event",
+                source="pytest"
+            ),
+            trace=TraceContext(trace_id=uuid4()),
+            event_timestamp=datetime.now(timezone.utc),
+            payload="wrong type"
         )
