@@ -73,3 +73,17 @@ def test_payload_type_enforced():
             event_timestamp=datetime.now(timezone.utc),
             payload="wrong type"
         )
+
+
+def test_metadata_schema_identity_mismatch():
+    with pytest.raises(ValueError):
+        DummyEvent(
+            metadata=EventMetadata(
+                schema_version="v2",
+                event_type="wrong.event",
+                source="pytest"
+            ),
+            trace=TraceContext(trace_id=uuid4()),
+            event_timestamp=datetime.now(timezone.utc),
+            payload={"key": "value"}
+        )
