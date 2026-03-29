@@ -184,3 +184,19 @@ def test_schema_version_format_is_valid():
 
     assert schema.__schema_version__.startswith("v")
     assert schema.__schema_version__[1:].isdigit()
+
+
+# -----------------------------
+# Registry completeness check
+# -----------------------------
+
+def test_registry_entries_are_consistant():
+    """
+    Every registry entry must be internally consitent.
+    Prevents drift between metadata and keys.
+    """
+
+    for (event_type, version), schema in schema_registry._registry.items():
+
+            assert schema.__event_type__ == event_type
+            assert schema.__schema_version__ == version
