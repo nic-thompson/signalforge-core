@@ -166,3 +166,21 @@ def test_registry_returns_base_event_subclass():
     )
 
     assert issubclass(schema, BaseEvent)
+
+
+# ----------------------------------
+# Versioning contract guarantees
+# ----------------------------------
+
+def test_schema_version_format_is_valid():
+    """
+    Schema versions must follow vN convention
+    """
+
+    schema = schema_registry.get_schema(
+        "device.registration",
+        "v1",
+    )
+
+    assert schema.__schema_version__.startswith("v")
+    assert schema.__schema_version__[1:].isdigit()
