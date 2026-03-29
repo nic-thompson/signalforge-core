@@ -1,0 +1,11 @@
+[project]
+name = "structured-logging-python"
+version = "0.1.0"
+description = "Structured logging primitives for distributed ML telemetry pipelines"
+authors = [{ name = "Platform Engineering" }]
+requires-python = ">=3.10"
+
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
