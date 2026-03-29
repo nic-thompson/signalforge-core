@@ -140,10 +140,29 @@ def test_duplicate_schema_registrarion_fails():
     """
 
     registry = schema_registry
-    
+
     with pytest.raises(ValueError):
         registry.register(
             "device.registration",
             "v1",
             DeviceRegistrationEvent,
         )
+
+
+# --------------------------
+# Type-saftey guarantees
+# --------------------------
+
+def test_registry_returns_base_event_subclass():
+    """
+    All registry schemas must inherit BaseEvent
+    """
+
+    from event_schema_contracts.base.base_event import BaseEvent
+
+    schema = schema_registry.get_schema(
+        "device.registration",
+        "v1",
+    )
+
+    assert issubclass(schema, BaseEvent)
