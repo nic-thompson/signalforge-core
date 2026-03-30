@@ -31,7 +31,7 @@ class StructuredJSONFormatter(logging.Formatter):
             "service": ServiceContext.service_name(),
             "environment": ServiceContext.environment(),
             "trace_id": getattr(record, "trace_id", None),
-            "event_type": getattr(record, "event_id", "log.event"),
+            "event_type": getattr(record, "event_type", "log.event"),
             "message": record.getMessage(),
             "metadata": metadata,
         }

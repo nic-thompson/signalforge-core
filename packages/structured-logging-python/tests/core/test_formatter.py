@@ -87,7 +87,7 @@ def test_event_fields_override_defaults():
 
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
     record.trace_id = "abc123"
-    record.event_id = "auth.login"
+    record.event_type = "auth.login"
 
     parsed = json.loads(formatter.format(record))
 
