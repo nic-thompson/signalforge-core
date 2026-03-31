@@ -44,13 +44,13 @@ class ServiceContext:
 
     @classmethod
     def service_name(cls) -> str:
-        if cls._service_name is None:
+        if not cls._service_name:
             raise RuntimeError("ServiceContext not initialised")
         return cls._service_name
     
     @classmethod
     def environment(cls) -> str:
-        if cls._environment is None:
+        if not cls._environment:
             raise RuntimeError("ServiceContext not initialised")
         return cls._environment
 
