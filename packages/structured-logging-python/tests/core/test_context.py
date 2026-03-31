@@ -4,13 +4,6 @@ import pytest
 
 from structured_logging.core.context import ServiceContext
 
-@pytest.fixture(autouse=True)
-def reset_service_context():
-    """Reset ServiceContext singleton state between tests."""
-    ServiceContext._service_name = None
-    ServiceContext._environment = None
-    ServiceContext._initialised = False
-
 def test_initialise_sets_service_identity():
     ServiceContext.initialise("feature-materialiser", "prod")
 
