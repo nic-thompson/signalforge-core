@@ -1,23 +1,10 @@
 from datetime import datetime
 import json, logging
 
-import pytest
-
-
-from structured_logging.core.context import ServiceContext
 from structured_logging.core.formatter import StructuredJSONFormatter
 
-@pytest.fixture(autouse=True)
-def reset_service_context():
-    """Reset ServiceContext singleton state between tests."""
-    ServiceContext._service_name = None
-    ServiceContext._environment = None
-    ServiceContext._initialised = False
 
-    ServiceContext.initialise("test-service", "test")
-
-
-def test_formatter_outputs_valid_json():
+def test_formatter_outputs_valid_json(service_context):
 
     formatter = StructuredJSONFormatter()
 
@@ -39,7 +26,7 @@ def test_formatter_outputs_valid_json():
     assert parsed["environment"] == "test"
 
 
-def test_required_fields_present():
+def test_required_fields_present(service_context):
 
     formatter = StructuredJSONFormatter()
 
@@ -55,7 +42,7 @@ def test_required_fields_present():
     assert "metadata" in parsed
 
 
-def test_defaults_when_optional_fields_missing():
+def test_defaults_when_optional_fields_missing(service_context):
 
     formatter = StructuredJSONFormatter()
 
@@ -68,7 +55,7 @@ def test_defaults_when_optional_fields_missing():
     assert parsed["metadata"] == {}
 
 
-def test_metadata_passthrough():
+def test_metadata_passthrough(service_context):
     
     formatter = StructuredJSONFormatter()
 
@@ -81,7 +68,7 @@ def test_metadata_passthrough():
     assert parsed["metadata"]["user_id"] == 42
 
 
-def test_event_fields_override_defaults():
+def test_event_fields_override_defaults(service_context):
     
     formatter = StructuredJSONFormatter()
 
@@ -95,7 +82,7 @@ def test_event_fields_override_defaults():
     assert parsed["event_type"] == "auth.login"
 
 
-def test_timestamp_is_isoformat():
+def test_timestamp_is_isoformat(service_context):
     
     formatter = StructuredJSONFormatter()
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
@@ -106,7 +93,7 @@ def test_timestamp_is_isoformat():
     assert parsed["timestamp"].endswith("+00:00")
 
 
-def test_schema_is_stable():
+def test_schema_is_stable(service_context):
     formatter = StructuredJSONFormatter()
     record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
 
