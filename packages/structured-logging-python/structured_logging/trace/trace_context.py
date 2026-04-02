@@ -111,3 +111,20 @@ class TraceContext:
                 _trace_context.set(previous)
             else:
                 cls.clear()
+
+
+    # ---------- RESTORE PREVIOUS CONTEXT ----------
+
+    @classmethod
+    def restore(cls, previous: TraceState | None) -> None:
+        """
+        Restore a previously captured trace context.
+
+        Used by instrumentation utilities that temporarily
+        create child spans and must safely revert afterwards.
+        """
+        if previous is not None:
+            _trace_context.set(previous)
+        else:
+            cls.clear()
+
