@@ -33,7 +33,7 @@ def reset_service_context():
     yield
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def service_context():
     """
     Provide an initialised ServiceContext for tests that need it.
