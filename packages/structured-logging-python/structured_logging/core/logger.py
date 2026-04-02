@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 import os
 
-from typing import Any, Dict, Optional
+from typing import Any, Mapping
 
 from structured_logging.core.context import ServiceContext
 from structured_logging.core.formatter import StructuredJSONFormatter
+from structured_logging.schema.log_event_schema import StructuredError
 
 class StructuredLogger:
     """
@@ -41,28 +42,30 @@ class StructuredLogger:
         self.logger.propagate = False
 
     def log(
-            self, 
-            level: int, 
-            message: str,
-            event_type: str,
-            metadata: Dict[str, Any] | None = None,
-            trace_id: str | None = None
+        self,
+        level: int,
+        message: str,
+        event_type: str,
+        metadata: Mapping[str, Any] | None = None,
+        trace_id: str | None = None,
+        error: StructuredError | None = None,
     ) -> None:
         
         extra = {
-            "event_type": event_type,
-            "metadata": metadata or {},
-            "trace_id": trace_id
-        }
+        "event_type": event_type,
+        "metadata": metadata or {},
+        "trace_id": trace_id,
+        "error": error,
+    }
 
         self.logger.log(level, message, extra=extra)
 
     def info(
-            self, 
-            message: str,
-            event_type: str = "log.info",
-            metadata: Dict[str, Any] | None = None,
-            trace_id: str | None = None
+        self,
+        message: str,
+        event_type: str = "log.info",
+        metadata: Mapping[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> None:
     
         self.log(
@@ -77,7 +80,7 @@ class StructuredLogger:
             self, 
             message: str,
             event_type: str = "log.warning",
-            metadata: Dict[str, Any] | None = None,
+            metadata: Mapping[str, Any] | None = None,
             trace_id: str | None = None
     ) -> None:
     
@@ -90,26 +93,28 @@ class StructuredLogger:
         )
 
     def error(
-            self, 
-            message: str,
-            event_type: str = "log.error",
-            metadata: Dict[str, Any] | None = None,
-            trace_id: str | None = None
+        self,
+        message: str,
+        event_type: str = "log.error",
+        metadata: Mapping[str, Any] | None = None,
+        trace_id: str | None = None,
+        error: StructuredError | None = None,
     ) -> None:
-    
+
         self.log(
-            logging.ERROR, 
-            message, 
-            event_type, 
-            metadata, 
-            trace_id
+            logging.ERROR,
+            message,
+            event_type,
+            metadata,
+            trace_id,
+            error,
         )
 
     def debug(
             self, 
             message: str,
             event_type: str = "log.debug",
-            metadata: Dict[str, Any] | None = None,
+            metadata: Mapping[str, Any] | None = None,
             trace_id: str | None = None
     ) -> None:
     
