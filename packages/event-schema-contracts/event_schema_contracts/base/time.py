@@ -25,8 +25,6 @@ class UTCTimestampModel(BaseModel):
             isinstance(value, datetime)
             and info.field_name in cls.__utc_fields__
         ):
-            if not isinstance(value, datetime):
-                return value
             
             if value.tzinfo is None:
                 raise ValueError(
