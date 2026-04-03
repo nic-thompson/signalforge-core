@@ -1,7 +1,8 @@
 from enum import Enum
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
 
 class PipelineStage(str, Enum):
     INGESTION = "ingestion"
@@ -10,6 +11,7 @@ class PipelineStage(str, Enum):
     FEATURE_BUILDING = "feature_building"
     EXPORT = "export"
     INFERENCE = "inference"
+
 
 class TraceContext(BaseModel):
     """
@@ -21,15 +23,26 @@ class TraceContext(BaseModel):
 
     trace_id: UUID = Field(
         default_factory=uuid4,
-        description="Global trace identifier shared across pipeline stages"
+        description="Global trace identifier shared across pipeline stages",
     )
 
-    root_trace_id: UUID = Field(
-        default_factory=uuid4,
-        description="Root lineage identifier for replay tracking"
+    root_trace_id: UUID | None = Field(
+        default=None,
+        description="Root lineage identifier for replay tracking",
     )
 
     pipeline_stage: PipelineStage = Field(
         default=PipelineStage.INGESTION,
-        description="Pipeline processing stage"
+        description="Pipeline processing stage",
     )
+
+    model_config = {
+        "frozen": True,
+        "extra": "forbid",
+    }
+
+    @model_validator(mode="after")
+    def ensure_root_trace(self):
+        if self.root_trace_id is None:
+            object.__setattr__(self, "root_trace_id", self.trace_id)
+        return self

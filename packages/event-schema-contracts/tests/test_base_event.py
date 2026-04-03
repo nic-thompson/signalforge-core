@@ -96,3 +96,12 @@ def test_metadata_auto_injected():
     )
 
     assert event.metadata.event_type == "test.event"
+
+
+def test_schema_version_validator_returns_value():
+    m = EventMetadata(
+        schema_version="v1",
+        event_type="test.event",
+        source="pytest",
+    )
+    assert m.schema_version == "v1"
