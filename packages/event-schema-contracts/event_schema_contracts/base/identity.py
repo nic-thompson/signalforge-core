@@ -18,7 +18,7 @@ class UUIDv4Model(BaseModel):
         if not isinstance(cls.__uuid_v4_fields__, tuple):
             raise TypeError("__uuid_v4_fields__ must be tuple[str, ...]")
 
-    @field_validator("*")
+    @field_validator("*", check_fields=False)
     @classmethod
     def validate_uuid_fields(cls, value, info):
         

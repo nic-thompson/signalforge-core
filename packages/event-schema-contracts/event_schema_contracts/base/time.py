@@ -17,7 +17,7 @@ class UTCTimestampModel(BaseModel):
         if not isinstance(cls.__utc_fields__, tuple):
             raise TypeError("__utc_fields__ must be tuple[str, ...]")
 
-    @field_validator("*")
+    @field_validator("*", check_fields=False)
     @classmethod
     def validate_utc_fields(cls, value: Any, info):
         
