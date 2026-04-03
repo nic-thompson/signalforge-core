@@ -6,7 +6,6 @@ from enum import Enum
 from pydantic import Field
 
 from event_schema_contracts.base.base_event import BaseEvent
-from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.base.domain import DomainEventPayload
 
 class DeviceType(str, Enum):
