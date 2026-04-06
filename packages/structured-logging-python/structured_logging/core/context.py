@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from threading import Lock 
+from threading import Lock
 
 
 class ServiceContext:
@@ -23,7 +23,7 @@ class ServiceContext:
     ) -> None:
         """
         Initialise service metadata context.
-        
+
         Must be called exactly once before logging begins.
         """
 
@@ -41,17 +41,26 @@ class ServiceContext:
             cls._environment = environment
             cls._initialised = True
 
-
     @classmethod
     def service_name(cls) -> str:
         if not cls._service_name:
             raise RuntimeError("ServiceContext not initialised")
         return cls._service_name
-    
+
     @classmethod
     def environment(cls) -> str:
         if not cls._environment:
             raise RuntimeError("ServiceContext not initialised")
         return cls._environment
 
+    @classmethod
+    def _reset_for_tests(cls) -> None:
+        """
+        Reset singleton state between pytest runs.
 
+        Not part of public API.
+        """
+        with cls._lock:
+            cls._service_name = None
+            cls._environment = None
+            cls._initialised = False
