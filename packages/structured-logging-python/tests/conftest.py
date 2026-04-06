@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import logging
 import pytest
 
@@ -33,7 +34,7 @@ def reset_service_context():
     yield
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def service_context():
     """
     Provide an initialised ServiceContext for tests that need it.
@@ -80,3 +81,8 @@ def clean_root_logger():
     yield
 
     logging.getLogger().handlers.clear()
+
+
+@pytest.fixture
+def utc_now():
+    return datetime.now(timezone.utc)
