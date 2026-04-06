@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import logging
 import os
-
 from typing import Any, Mapping
 
-from structured_logging.core.context import ServiceContext
 from structured_logging.core.formatter import StructuredJSONFormatter
 from structured_logging.schema.log_event_schema import StructuredError
+
 
 class StructuredLogger:
     """
     Production structured logger wrapper.
 
-    Provides schema-compliant structured logging across services. 
+    Provides schema-compliant structured logging across services.
     """
 
     def __init__(self, name: str) -> None:
@@ -25,15 +24,19 @@ class StructuredLogger:
         Configure logging backend.
         """
 
-        if self.logger.handlers:
+        # Ensure StructuredJSONFormatter exists exactly once
+        if any(
+            isinstance(h.formatter, StructuredJSONFormatter)
+            for h in self.logger.handlers
+        ):
             return
-        
+
         log_level = getattr(
             logging,
             os.getenv("LOG_LEVEL", "INFO").upper(),
-            logging.INFO
+            logging.INFO,
         )
-    
+
         handler = logging.StreamHandler()
         handler.setFormatter(StructuredJSONFormatter())
 
@@ -50,13 +53,13 @@ class StructuredLogger:
         trace_id: str | None = None,
         error: StructuredError | None = None,
     ) -> None:
-        
+
         extra = {
-        "event_type": event_type,
-        "metadata": metadata or {},
-        "trace_id": trace_id,
-        "error": error,
-    }
+            "event_type": event_type,
+            "metadata": metadata or {},
+            "trace_id": trace_id,
+            "error": error,
+        }
 
         self.logger.log(level, message, extra=extra)
 
@@ -67,29 +70,29 @@ class StructuredLogger:
         metadata: Mapping[str, Any] | None = None,
         trace_id: str | None = None,
     ) -> None:
-    
+
         self.log(
-            logging.INFO, 
-            message, 
-            event_type, 
-            metadata, 
-            trace_id
+            logging.INFO,
+            message,
+            event_type,
+            metadata,
+            trace_id,
         )
-    
+
     def warning(
-            self, 
-            message: str,
-            event_type: str = "log.warning",
-            metadata: Mapping[str, Any] | None = None,
-            trace_id: str | None = None
+        self,
+        message: str,
+        event_type: str = "log.warning",
+        metadata: Mapping[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> None:
-    
+
         self.log(
-            logging.WARNING, 
-            message, 
-            event_type, 
-            metadata, 
-            trace_id
+            logging.WARNING,
+            message,
+            event_type,
+            metadata,
+            trace_id,
         )
 
     def error(
@@ -111,18 +114,17 @@ class StructuredLogger:
         )
 
     def debug(
-            self, 
-            message: str,
-            event_type: str = "log.debug",
-            metadata: Mapping[str, Any] | None = None,
-            trace_id: str | None = None
+        self,
+        message: str,
+        event_type: str = "log.debug",
+        metadata: Mapping[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> None:
-    
+
         self.log(
-            logging.DEBUG, 
-            message, 
-            event_type, 
-            metadata, 
-            trace_id
+            logging.DEBUG,
+            message,
+            event_type,
+            metadata,
+            trace_id,
         )
-        
