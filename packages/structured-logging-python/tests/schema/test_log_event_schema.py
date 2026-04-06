@@ -11,8 +11,30 @@ from structured_logging.schema.log_event_schema import (
     SCHEMA_VERSION,
 )
 
+from structured_logging.core.context import ServiceContext
 from structured_logging.core.formatter import StructuredJSONFormatter
 from structured_logging.core.logger import StructuredLogger
+
+
+# --------------------------------------------------
+# Test environment setup
+# --------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def service_context():
+    """
+    Ensure ServiceContext is initialised for formatter + logger schema tests.
+
+    Formatter requires service/environment metadata.
+    """
+
+    ServiceContext._reset_for_tests()
+    ServiceContext.initialise("test-service", "test")
+
+    yield
+
+    ServiceContext._reset_for_tests()
 
 
 # --------------------------------------------------
@@ -155,6 +177,20 @@ def test_formatter_serializes_structured_error():
 # --------------------------------------------------
 
 
+def _get_structured_formatter(logger: StructuredLogger) -> StructuredJSONFormatter:
+    """
+    Safely retrieve StructuredJSONFormatter from logger handlers.
+
+    Avoids relying on handler ordering assumptions.
+    """
+
+    for handler in logger.logger.handlers:
+        if isinstance(handler.formatter, StructuredJSONFormatter):
+            return handler.formatter
+
+    raise AssertionError("StructuredJSONFormatter not attached to logger")
+
+
 def test_structured_logger_emits_schema_compliant_event(logger, capture_handler):
 
     logger.logger.addHandler(capture_handler)
@@ -167,12 +203,15 @@ def test_structured_logger_emits_schema_compliant_event(logger, capture_handler)
 
     record = capture_handler.records[0]
 
-    formatted = logger.logger.handlers[0].formatter.format(record)
+    formatter = _get_structured_formatter(logger)
+    formatted = formatter.format(record)
+
     parsed = json.loads(formatted)
 
     assert parsed["event_type"] == "log.integration"
     assert parsed["metadata"]["stage"] == "unit-test"
     assert parsed["level"] == "INFO"
+
 
 def test_structured_logger_error_supports_structured_error(logger, capture_handler):
 
@@ -192,7 +231,9 @@ def test_structured_logger_error_supports_structured_error(logger, capture_handl
 
     record = capture_handler.records[0]
 
-    formatted = logger.logger.handlers[0].formatter.format(record)
+    formatter = _get_structured_formatter(logger)
+    formatted = formatter.format(record)
+
     parsed = json.loads(formatted)
 
     assert parsed["error"]["error_code"] == "FEATURE_FAIL"
