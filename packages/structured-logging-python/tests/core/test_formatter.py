@@ -138,6 +138,8 @@ def test_schema_is_stable(service_context):
         "event_type",
         "message",
         "metadata",
+        "schema_version",
+        "error",
     }
 
 
