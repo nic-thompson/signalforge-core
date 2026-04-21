@@ -1,7 +1,7 @@
 from telemetry_parser.protocol.sip_parser import SIPMessage
 from .field_mapper import FieldMapper, ExtractedEventFields
 
-class UnsupportedProtocolEvent(Exception)
+class UnsupportedProtocolEvent(Exception):
     pass
 
 class EventExtractor:
