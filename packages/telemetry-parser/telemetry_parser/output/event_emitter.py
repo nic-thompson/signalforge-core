@@ -1,4 +1,4 @@
-from typing import Iterator, Iterable, Callable, Mapping, Any
+from typing import Callable
 
 from telemetry_parser.output.structured_event import StructuredEvent
 
@@ -11,62 +11,43 @@ class EventEmitter:
     - iterator-based pipelines
     - replay workflows
     - analytics ingestion
-    - observability hooks via on_emit callback
-
-    Stateless and thread-safe unless the callback is not.
+    - dataset regeneration
+    - structured logging integration (future)
     """
 
     def __init__(
         self,
-        on_emit: Callable[[StructuredEvent], None] | None = None,
+        preserve_event_ids: bool = False,
+        id_provider: Callable[[], str] | None = None,
     ) -> None:
         """
-        Optional callback invoked once per emitted event.
+        Parameters
+        ----------
+        preserve_event_ids:
+            Ensures event identifiers remain stable during replay or dataset regeneration.
+
+        id_provider:
+            Optional deterministic ID provider used when generating replacement event IDs.
         """
 
-        self.on_emit = on_emit
+        self.preserve_event_ids = preserve_event_ids
+        self.id_provider = id_provider
 
     def emit(
         self,
         event: StructuredEvent,
     ) -> StructuredEvent:
         """
-        Emits a single structured event.
+        Emits a structured telemetry event.
+
+        Behaviour depends on replay configuration:
+
+        - If preserve_event_ids=True → event IDs remain unchanged
+        - If preserve_event_ids=False and id_provider supplied → deterministic IDs injected
+        - Otherwise → event emitted unchanged
         """
 
-        if self.on_emit is not None:
-            self.on_emit(event)
+        if not self.preserve_event_ids and self.id_provider is not None:
+            event.event_id = self.id_provider()
 
         return event
-
-    def emit_many(
-        self,
-        events: Iterable[StructuredEvent],
-    ) -> Iterator[StructuredEvent]:
-        """
-        Emits multiple structured events lazily.
-        """
-
-        for event in events:
-            yield self.emit(event)
-
-    def emit_json(
-        self,
-        event: StructuredEvent,
-    ) -> Mapping[str, Any]:
-        """
-        Emits JSON-safe event representation.
-        """
-
-        return self.emit(event).to_json_safe()
-
-    def emit_many_json(
-        self,
-        events: Iterable[StructuredEvent],
-    ) -> Iterator[Mapping[str, Any]]:
-        """
-        Emits multiple JSON-safe events lazily.
-        """
-
-        for event in events:
-            yield self.emit_json(event)
