@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterator, Optional
 
-from .session_tracker import SessionTracker, TCPSession
+from telemetry_parser.stream.session_tracker import SessionTracker, TCPSession
+from telemetry_parser.observability.parser_observer import ParserObserver
 
 @dataclass
 class TCPPacket:
@@ -31,8 +32,13 @@ class TCPReassembler:
     - deterministic replay-safe ordering
     """
 
-    def __init__(self) -> None:
-        self.session_tracker = SessionTracker()
+    def __init__(
+            self,
+            observer: ParserObserver | None = None,
+    ) -> None:
+
+        self.session_tracker = SessionTracker(observer)
+        self.observer = observer
 
     
     def process_packet(
@@ -71,6 +77,12 @@ class TCPReassembler:
             session.expected_sequence = seq
 
         if seq < session.expected_sequence:
+
+            if self.observer:
+                self.observer.on_packet_dropped(
+                    "out_of_order_retransmit",
+                    {"sequence": seq},
+                )
             # duplicate / retransmitted segment ignored
             return
 
