@@ -1,4 +1,6 @@
+import datetime
 from typing import Iterator
+from telemetry_parser.observability.parser_observer import ParserObserver
 
 class MessageDecoder:
     """
@@ -12,8 +14,13 @@ class MessageDecoder:
 
     HEADER_TERMINATOR = b"\r\n\r\n"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        observer: ParserObserver | None = None,
+    ) -> None:
+        
         self.buffer: bytearray = bytearray()
+        self.observer = observer
 
     def feed(self, data: bytes) -> Iterator[bytes]:
         """
@@ -33,6 +40,12 @@ class MessageDecoder:
             message_end = boundary + terminator_len
 
             message = bytes(self.buffer[:message_end])
+
+            if self.observer:
+                self.observer.on_message_reconstructed(
+                    len(message),
+                    datetime.utcnow(),
+                )
 
             del self.buffer[:message_end]
 
