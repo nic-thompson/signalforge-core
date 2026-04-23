@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, Iterable, Tuple, Optional
+from typing import Dict, Iterable, Tuple
 import uuid
+
+from telemetry_parser.observability.parser_observer import ParserObserver
 
 SessionKey = Tuple[str, int, str, int]
 
@@ -26,7 +28,6 @@ class TCPSession:
         self.end_timestamp = timestamp
     
 
-
 class SessionTracker:
     """
     Maintains canonical TCP session state across bidirectional packet flows,
@@ -38,8 +39,12 @@ class SessionTracker:
     - replay-safe ordering
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        observer: ParserObserver | None = None
+    ) -> None:
         self.sessions: Dict[SessionKey, TCPSession] = {}
+        self.observer = observer
 
     @staticmethod
     def _normalise_session_key(
@@ -86,6 +91,17 @@ class SessionTracker:
 
             self.sessions[key] = session
 
+            if self.observer:
+                self.observer.on_session_start(
+                    session.session_id,
+                    {
+                        "source_ip": session.source_ip,
+                        "destination_ip": session.destination_ip,
+                        "source_port": session.source_port,
+                        "destination_port": session.destination_port,
+                    },
+                )
+
         else:
             session = self.sessions[key]
             session.update_activity(timestamp)
@@ -113,6 +129,17 @@ class SessionTracker:
 
         if session:
             session.close(timestamp)
+
+        if self.observer and session.start_timestamp:
+
+            duration = (
+                timestamp - session.start_timestamp
+            ).total_seconds()
+
+            self.observer.on_session_end(
+                session.session_id,
+                duration,
+            )
 
     def active_sessions(self) -> Iterable[TCPSession]:
 
