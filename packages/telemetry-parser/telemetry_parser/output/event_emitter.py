@@ -1,6 +1,7 @@
 from typing import Callable
 
 from telemetry_parser.output.structured_event import StructuredEvent
+from telemetry_parser.observability.parser_observer import ParserObserver
 
 
 class EventEmitter:
@@ -17,6 +18,8 @@ class EventEmitter:
 
     def __init__(
         self,
+        on_emit=None,
+        observer: ParserObserver | None = None,
         preserve_event_ids: bool = False,
         id_provider: Callable[[], str] | None = None,
     ) -> None:
@@ -32,6 +35,8 @@ class EventEmitter:
 
         self.preserve_event_ids = preserve_event_ids
         self.id_provider = id_provider
+        self.on_emit = on_emit
+        self.observer = observer
 
     def emit(
         self,
@@ -49,5 +54,14 @@ class EventEmitter:
 
         if not self.preserve_event_ids and self.id_provider is not None:
             event.event_id = self.id_provider()
+
+        if self.on_emit:
+            self.on_emit(event)
+
+        if hasattr(self, "observer") and self.observer:
+            self.observer.on_event_emitted(
+                event.event_type,
+                event.event_id,
+            )
 
         return event
