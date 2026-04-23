@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Dict
 
+from telemetry_parser.observability.parser_observer import ParserObserver
+
 class MalformedSIPMessageError(Exception):
     pass
 
@@ -24,12 +26,25 @@ class SIPParser:
     - malformed tolerance
     """
 
+    def __init__(
+        self,
+        observer: ParserObserver | None = None
+    ) -> None:
+        self.observer = observer
+
 
     def parse(self, raw_message: bytes) -> SIPMessage | None:
 
         try:
             text = raw_message.decode(errors="ignore")
         except Exception:
+
+            if self.observer:
+                self.observer.on_parse_error(
+                    "decode_failure",
+                    len(raw_message),
+                )
+                
             return None
         
         lines = text.split("\r\n")
