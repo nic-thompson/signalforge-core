@@ -1,3 +1,4 @@
+from telemetry_parser.observability.parser_observer import ParserObserver
 from telemetry_parser.protocol.sip_parser import SIPMessage
 from .field_mapper import FieldMapper, ExtractedEventFields
 
@@ -10,8 +11,12 @@ class EventExtractor:
     from parsed SIP protocol messages.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        observer: ParserObserver | None = None
+    ) -> None:
         self.mapper = FieldMapper()
+        self.observer = observer
 
     def extract(
         self,

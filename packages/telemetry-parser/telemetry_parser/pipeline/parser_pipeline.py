@@ -1,5 +1,6 @@
 from typing import Iterable, Iterator
 
+from telemetry_parser.observability.parser_observer import ParserObserver
 from telemetry_parser.stream.tcp_reassembler import TCPReassembler, TCPPacket
 from telemetry_parser.protocol.message_decoder import MessageDecoder
 from telemetry_parser.protocol.sip_parser import SIPParser
@@ -24,6 +25,7 @@ class ParserPipeline:
         self,
         replay_mode: bool = False,
         preserve_event_ids: bool = False,
+        observer: ParserObserver | None = None
     ) -> None:
         """
         Constructs a streaming-safe telemetry parsing pipeline.
@@ -39,22 +41,22 @@ class ParserPipeline:
 
         self.replay_mode = replay_mode
         self.preserve_event_ids = preserve_event_ids
+        self.observer = observer
 
-        self.reassembler = TCPReassembler()
-
-        self.decoder = MessageDecoder()
-
-        self.parser = SIPParser()
-
-        self.extractor = EventExtractor()
+        self.reassembler = TCPReassembler(observer)
+        self.decoder = MessageDecoder(observer)
+        self.parser = SIPParser(observer)
+        self.extractor = EventExtractor(observer)
 
         self.normaliser = EventNormaliser(
             replay_mode=replay_mode,
             preserve_event_ids=preserve_event_ids,
+            observer=observer,
         )
 
         self.emitter = EventEmitter(
             preserve_event_ids=preserve_event_ids,
+            observer=observer
         )
 
     def parse_stream(

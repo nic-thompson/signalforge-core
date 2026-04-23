@@ -2,6 +2,7 @@ import uuid
 from typing import Dict, Any
 
 from telemetry_parser.extraction.field_mapper import ExtractedEventFields
+from telemetry_parser.observability.parser_observer import ParserObserver
 from telemetry_parser.output.structured_event import StructuredEvent
 from telemetry_parser.normalisation.timestamp_utils import TimestampUtils
 
@@ -24,6 +25,7 @@ class EventNormaliser:
         self,
         replay_mode: bool = False,
         preserve_event_ids: bool = False,
+        observer: ParserObserver | None = None,
     ) -> None:
         """
         Parameters
@@ -37,6 +39,7 @@ class EventNormaliser:
 
         self.replay_mode = replay_mode
         self.preserve_event_ids = preserve_event_ids
+        self.observer = observer
 
     def normalise(
         self,
