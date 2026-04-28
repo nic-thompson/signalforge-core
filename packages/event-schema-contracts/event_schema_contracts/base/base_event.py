@@ -157,9 +157,9 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
         Validate schema identity + timestamp ordering.
         """
 
-        if self.ingest_timestamp + MAX_CLOCK_SKEW < self.event_timestamp:
+        if self.event_timestamp > self.ingest_timestamp + MAX_CLOCK_SKEW:
             raise ValueError(
-                "ingest_timestamp cannot be earlier than event_timestamp"
+                "event_timestamp is too far in the future relative to ingest_timestamp"
             )
 
         if self.metadata.event_type != self.__class__.__event_type__:
