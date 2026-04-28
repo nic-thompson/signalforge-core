@@ -32,7 +32,7 @@ class DeviceRegistrationPayload(
     )
 
     __semver_fields__: ClassVar[tuple[str, ...]] = (
-        "firmware_version"
+        "firmware_version",
     )
 
     device_id: UUID = Field(
