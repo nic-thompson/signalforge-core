@@ -4,7 +4,7 @@ import re
 
 SEMVER_PATTERN = re.compile(r"^v\d+(\.\d+)*$")
 EVENT_TYPE_PATTERN = re.compile(r"^[a-z0-9]+(\.[a-z0-9]+)+$")
-SOURCE_PATTERN = re.compile(r"^[a-z0-9]+$")
+SOURCE_PATTERN = re.compile(r"^[a-z0-9]+([.\-_][a-z0-9]+)*$")
 
 
 class EventMetadata(BaseModel):
