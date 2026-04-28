@@ -1,11 +1,14 @@
 from datetime import datetime
-from typing import Dict, Any, ClassVar
+from typing import Dict, Any, Union, ClassVar
 from uuid import UUID
 
 from pydantic import Field
 
 from event_schema_contracts.base.base_event import BaseEvent
 from event_schema_contracts.base.domain import DomainEventPayload
+
+# Permitted scalar types for individual feature values.
+FeatureValue = Union[int, float, bool, str]
 
 class FeatureVectorPayload(DomainEventPayload):
     """
@@ -39,14 +42,15 @@ class FeatureVectorPayload(DomainEventPayload):
         description="Timestamp representing feature computation time"
     )
 
-    feature_values: Dict[str, Any] = Field(
+    feature_values: Dict[str, FeatureValue] = Field(
         ...,
-        description="Dictionary of feature name -> feature value"
+        description="Dictionary of feature name to scalar feature value (int, float, bool, or str)",
     )
 
     feature_version: str = Field(
         ...,
-        description="Feature schema version identifier"
+        pattern=r"^v\d+(\.\d+)*$",
+        description="Feature schema version identifier (e.g. v1, v1.2, v1.2.3)",
     )
 
     source_event_id: UUID = Field(
