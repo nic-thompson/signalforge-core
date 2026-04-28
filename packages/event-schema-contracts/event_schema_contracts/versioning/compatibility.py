@@ -63,6 +63,18 @@ def parse_version(version: str) -> SchemaVersion:
     return SchemaVersion(*parts_int)
 
 def ensure_compatibility(source_version: str, target_version: str) -> None:
+    """
+    Assert that ``target_version`` is a valid forward-compatible upgrade of
+    ``source_version``.
+
+    ``source_version`` is the version the producer (or requesting consumer)
+    currently carries.  ``target_version`` is the candidate schema available
+    in the registry.
+
+    Raises ``ValueError`` if:
+    - the major versions differ (breaking change boundary), or
+    - ``target_version`` is older than ``source_version`` (downgrade not permitted).
+    """
     source = parse_version(source_version)
     target = parse_version(target_version)
 
