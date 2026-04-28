@@ -41,8 +41,9 @@ class TraceContext(BaseModel):
         "extra": "forbid",
     }
 
-    @model_validator(mode="after")
-    def ensure_root_trace(self):
-        if self.root_trace_id is None:
-            object.__setattr__(self, "root_trace_id", self.trace_id)
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def default_root_trace(cls, data):
+        if isinstance(data, dict) and data.get("root_trace_id") is None:
+            data["root_trace_id"] = data.get("trace_id")
+        return data
