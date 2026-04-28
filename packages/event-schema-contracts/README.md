@@ -87,7 +87,11 @@ Create a canonical telemetry event:
 from uuid import uuid4
 from datetime import datetime, timezone
 
-from event_schema_contracts.telemetry.device_event import DeviceRegistrationEvent
+from event_schema_contracts.telemetry.device_event import (
+    DeviceRegistrationEvent,
+    DeviceRegistrationPayload,
+    DeviceType,
+)
 from event_schema_contracts.base.trace import TraceContext, PipelineStage
 
 event = DeviceRegistrationEvent(
@@ -96,11 +100,11 @@ event = DeviceRegistrationEvent(
         pipeline_stage=PipelineStage.INGESTION,
     ),
     event_timestamp=datetime.now(timezone.utc),
-    payload={
+    payload=DeviceRegistrationPayload(
         "device_id": uuid4(),
         "device_type": "sensor",
         "registered_at": datetime.now(timezone.utc),
-    },
+    ),
 )
 ```
 

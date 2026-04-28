@@ -9,7 +9,7 @@ Events move through deterministic processing stages that preserve traceability, 
 
 Events originate from:
 
-- ingestion services 
+- ingestion services
 - device agents
 - API gateways
 - telemetry collectors
@@ -28,28 +28,28 @@ payload
 
 ---
 
-## Stage 2: Validation Boundry
+## Stage 2: Validation Boundary
 
 Validation workers enforce:
 
-- schema structure correcetness
+- schema structure correctness
 - timestamp ordering
 - UUID validity
 - payload type integrity
-- compatability constraints
+- compatibility constraints
 
-Invalid events must never cross the validation boundry.
+Invalid events must never cross the validation boundary.
 
 ---
 
 ## Stage 3: Enrichment
 
-Optional enrichement pipelines may attach:
+Optional enrichment pipelines may attach:
 
 - derived attributes
 - geo resolution
 - device classification
-- session linkage 
+- session linkage
 - aggregation context
 
 Enrichment must not mutate original payload fields.
@@ -66,7 +66,7 @@ Transformation includes:
 
 entity mapping
 window aggregation
-signal normalaisation
+signal normalisation
 feature version tagging
 
 Output:
@@ -82,7 +82,7 @@ These form the training dataset boundary.
 Dataset exporters assemble feature vectors into:
 
 training datasets
-evaluation datasets 
+evaluation datasets
 replay datasets
 monitoring snapshots
 
@@ -92,7 +92,7 @@ Export pipelines rely on schema version determinism.
 
 ## Stage 6: Inference Consumption
 
-Inference service consume feature.vector events for:
+Inference services consume feature.vector events for:
 
 online prediction
 shadow evaluation

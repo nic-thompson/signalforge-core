@@ -1,6 +1,6 @@
 # Schema Versioning Strategy
 
-This repositotry defines canonical telemetry and feature contracts shares across ingestion services, validation workers, enrichment pipelines, feature builders, dataset exporters, and inference APIs. Schema versioning ensures safe evolution while preserving dataset reproducibility and replay compatibility.
+This repository defines canonical telemetry and feature contracts shared across ingestion services, validation workers, enrichment pipelines, feature builders, dataset exporters, and inference APIs. Schema versioning ensures safe evolution while preserving dataset reproducibility and replay compatibility.
 
 ---
 
@@ -38,7 +38,7 @@ Major upgrades require:
 
 Example:
 
-device.regression v1 -> v2
+device.registration v1 -> v2
 
 NOT backward compatible.
 

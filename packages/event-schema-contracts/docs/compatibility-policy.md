@@ -1,15 +1,15 @@
 # Compatibility Policy
 
 This document defines schema compatibility guarantees across versions.
-Compatibility enforcement ensures ingestion stability, replay correctness, and dataset reproducability.
+Compatibility enforcement ensures ingestion stability, replay correctness, and dataset reproducibility.
 
 ---
 
-## Compatability Guarantees
+## Compatibility Guarantees
 
-Within the same version:
+Within the same major version:
 
-forward compatability is guaranteed
+forward compatibility is guaranteed
 backward compatibility is guaranteed
 
 Across major versions:
@@ -26,7 +26,7 @@ The following changes are permitted:
 
 optional field addition
 metadata extension
-trace extention
+trace extension
 new feature annotations
 
 These changes must not break existing consumers.
@@ -57,16 +57,16 @@ NOT ALLOWED
 
 ---
 
-Deprication Lifecycle
+## Deprecation Lifecycle
 
-Field deprication follows a structured lifecyle:
+Field deprecation follows a structured lifecycle:
 
 Phase 1: Introduce replacement field
 Phase 2: Mark legacy field deprecated
-Phase 3: Maintain compatability window
+Phase 3: Maintain compatibility window
 Phase 4: Remove in major version
 
-Example: 
+Example:
 
 device_model -> hardware_model
 
@@ -84,9 +84,9 @@ This guarantees:
 historical dataset regeneration
 training reproducibility
 audit traceability
-model rollback support 
+model rollback support
 
-Breaking replay compatibility is prohibited without a major version
+Breaking replay compatibility is prohibited without a major version increment.
 
 ---
 
