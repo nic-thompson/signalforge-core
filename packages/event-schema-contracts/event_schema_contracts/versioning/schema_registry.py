@@ -21,7 +21,7 @@ class SchemaRegistry:
 
     - map (event_type, schema_version) -> schema class
     - enforce version availability
-    - support ingenstion-time validation
+    - support ingestion-time validation
     - enable replay-safe schema resolution
     """
 
@@ -96,6 +96,9 @@ class SchemaRegistry:
                 continue
 
         if compatible_versions:
+            # Select the lowest compatible version >= requested.
+            # This gives the tightest forward-compatible match, avoiding
+            # unnecessary exposure to fields added in later minor versions.
             closest = min(compatible_versions, key=lambda item: item[0])[1]
             return self._registry[(event_type, closest)]
         
