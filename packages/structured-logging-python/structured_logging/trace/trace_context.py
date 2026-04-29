@@ -96,6 +96,16 @@ class TraceContext:
     def clear(cls) -> None:
         _trace_context.set(None)
 
+    @classmethod
+    def end_trace(cls) -> None:
+        """
+        Alias for clear(). Clears the current trace context.
+
+        Provided for adapter code that uses lifecycle-oriented naming
+        (start_trace / end_trace) rather than the lower-level clear().
+        """
+        cls.clear()
+
     # ---------- SPAN CONTEXT MANAGER ----------
 
     @classmethod
