@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 @dataclass(frozen=True)
 class ExtractedEventFields:
     device_id: str | None
-    registration_status: Literal["registered", "unknown"] | None
+    registration_status: Literal["registered"] | None
     latency: float | None
     retry_count: int | None
     transport_protocol: str | None
@@ -29,7 +29,7 @@ class FieldMapper:
     def map_registration_status(
         self,
         headers: Dict[str, str],
-    ) -> Literal["registered", "unknown"] | None:
+    ) -> Literal["registered"] | None:
         
         cseq = headers.get("cseq")
 
@@ -38,8 +38,8 @@ class FieldMapper:
         
         if "REGISTER" in cseq:
             return "registered"
-        
-        return "unknown"
+
+        return None
     
     def map_retry_count(
         self,
