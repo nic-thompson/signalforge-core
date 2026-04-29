@@ -159,7 +159,7 @@ def test_child_trace_created_if_existing_trace(
     
     handler(message)
 
-    mock_trace_context.child_trace_assert_called_once()
+    mock_trace_context.child_trace.assert_called_once()
 
 
 def test_trace_restoration_called(

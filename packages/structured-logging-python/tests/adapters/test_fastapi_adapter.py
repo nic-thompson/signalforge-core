@@ -157,7 +157,7 @@ async def test_exception_logging(
 
     mock_logger.emit_error.assert_called_once()
 
-    mock_trace_context.end_trace_assert_called_once()
+    mock_trace_context.end_trace.assert_called_once()
 
 
 @pytest.mark.anyio
@@ -182,7 +182,7 @@ async def test_trace_end_always_called(
             failing_call_next,
         )
 
-    mock_trace_context.end_trace_assert_called_once()
+    mock_trace_context.end_trace.assert_called_once()
 
 
 def test_configure_fastapi_logging(monkeypatch):

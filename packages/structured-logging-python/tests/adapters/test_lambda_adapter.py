@@ -1,5 +1,5 @@
 import structured_logging.adapters.lambda_adapter as module_under_test
-from structured_logging.adapters.lambda_adapter import lambda_logging_handler
+from structured_logging.adapters.lambda_adapter import lambda_logging_handler, _safe_event_metadata
 from unittest.mock import MagicMock, patch
 
 import pytest
