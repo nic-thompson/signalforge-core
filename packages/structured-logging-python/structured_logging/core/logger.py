@@ -5,7 +5,7 @@ import os
 from typing import Any, Mapping
 
 from structured_logging.core.formatter import StructuredJSONFormatter
-from structured_logging.schema.log_event_schema import StructuredError
+from structured_logging.schema.log_event_schema import StructuredError, LogLevel
 
 
 class StructuredLogger:
@@ -127,4 +127,45 @@ class StructuredLogger:
             event_type,
             metadata,
             trace_id,
+        )
+
+    def emit_error(
+        self,
+        error_code: str,
+        message: str,
+        event_type: str = "log.error",
+        metadata: Mapping[str, Any] | None = None,
+        trace_id: str | None = None,
+        severity: LogLevel | None = None,
+        retryable: bool | None = None,
+        origin: str | None = None,
+        exception_type: str | None = None,
+        stack_trace: str | None = None,
+    ) -> None:
+        """
+        Emit a structured error log with a canonical StructuredError payload.
+
+        Convenience wrapper around error() that constructs the StructuredError
+        from keyword arguments, so callers do not need to import StructuredError
+        directly.
+        """
+
+        structured_error = StructuredError(
+            error_code=error_code,
+            message=message,
+            exception_type=exception_type,
+            stack_trace=stack_trace,
+            severity=severity,
+            retryable=retryable,
+            origin=origin,
+            metadata=metadata,
+        )
+
+        self.log(
+            logging.ERROR,
+            message,
+            event_type,
+            metadata,
+            trace_id,
+            structured_error,
         )
