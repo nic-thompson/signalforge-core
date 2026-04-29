@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime, timezone
 from typing import Iterator
 from telemetry_parser.observability.parser_observer import ParserObserver
 
@@ -44,7 +44,7 @@ class MessageDecoder:
             if self.observer:
                 self.observer.on_message_reconstructed(
                     len(message),
-                    datetime.utcnow(),
+                    datetime.now(timezone.utc),
                 )
 
             del self.buffer[:message_end]
