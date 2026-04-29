@@ -19,6 +19,8 @@ def test_cold_start_logged_once():
     Ensure lambda.cold_start is emitted exactly once per container lifecycle.
     """
 
+    module_under_test._COLD_START = True
+
     mock_logger = MagicMock()
 
     @lambda_logging_handler(logger=mock_logger)
@@ -87,8 +89,8 @@ def test_invocation_completed_logged():
     with expected metadata fields.
     """
 
-    # Reset cold-start state for deterministic behaviou
-    module_under_test = _COLD_START = True
+    # Reset cold-start state for deterministic behaviour
+    module_under_test._COLD_START = True
 
     mock_logger = MagicMock()
 
@@ -124,8 +126,8 @@ def test_exception_emits_failure_event():
     and the exception is re-raised afer logging.
     """
 
-   # Reset cold-start state for deterministic behaviour
-    module_under_test._COLD_START = True 
+    # Reset cold-start state for deterministic behaviour
+    module_under_test._COLD_START = True
 
     mock_logger = MagicMock()
 
