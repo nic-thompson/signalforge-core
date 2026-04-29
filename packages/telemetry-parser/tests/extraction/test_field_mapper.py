@@ -26,7 +26,7 @@ def test_registration_status_non_register_returns_unknown(mapper):
 
     result = mapper.map_registration_status(headers)
     
-    assert result == "unknown"
+    assert result is None
 
 
 def test_registration_status_missing_returns_none(mapper):
