@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterator, Optional
+from typing import Iterator
 
 from telemetry_parser.stream.session_tracker import SessionTracker, TCPSession
 from telemetry_parser.observability.parser_observer import ParserObserver
@@ -115,6 +115,18 @@ class TCPReassembler:
 
             session.expected_sequence += len(payload)
 
+
+    def flush(self) -> Iterator[bytes]:
+        """
+        Flushes all remaining out-of-order buffered payloads across every
+        tracked session. Called by the pipeline at end-of-stream to ensure
+        deterministic termination.
+        """
+
+        for session in list(self.session_tracker.sessions.values()):
+            data = self.flush_session(session)
+            if data:
+                yield data
 
     def flush_session(
             self,
