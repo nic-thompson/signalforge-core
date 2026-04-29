@@ -44,7 +44,7 @@ def test_parse_missing_via_header():
     assert msg.source_ip is None   
 
 
-def test_test_missing_from_header():
+def test_missing_from_header():
 
     parser = SIPParser()
 
@@ -60,7 +60,7 @@ def test_test_missing_from_header():
     assert msg.device_id is None
 
 
-def test_test_missing_call_id():
+def test_missing_call_id():
 
     parser = SIPParser()
 
