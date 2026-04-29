@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Dict
 
-from structured_logging.trace.trace_context import TraceContext
+from structured_logging.trace.trace_context import TraceContext, _trace_context
 
 
 TRACE_HEADER_TRACE_ID = "x-trace-id"
@@ -76,6 +77,9 @@ class TracePropagation:
             pipeline_stage=headers.get(TRACE_HEADER_PIPELINE_STAGE),
         )
 
-        # Preserve span hierarchy
+        # Preserve span hierarchy: record the upstream span as our parent,
+        # then write the updated state back into the ContextVar so that
+        # TraceContext.get() returns the correct object.
         if upstream_span_id:
-            state.parent_span_id = upstream_span_id
+            updated = replace(state, parent_span_id = upstream_span_id)
+            _trace_context.set(updated)
