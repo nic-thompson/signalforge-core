@@ -5,7 +5,7 @@ import inspect
 import time
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 from structured_logging.core.logger import StructuredLogger
 from structured_logging.trace.trace_context import TraceContext
@@ -106,27 +106,28 @@ def worker_logging_handler(
                         },
                     )
 
-
                     raise 
+
+                else:
+
+                    duration_ms = round(
+                        (time.perf_counter() - start_time) * 1000,
+                        3,
+                    )
+
+                    logger.info(
+                        message="Worker execution completed",
+                        event_type="worker.execution.completed",
+                        metadata={
+                            "queue_name": queue_name,
+                            "duration_ms": duration_ms,
+                        },
+                    )
 
                 finally: 
 
                     TraceContext.end_trace()
-
-                duration_ms = round(
-                    (time.perf_counter() - start_time) * 1000,
-                    3,
-                )
-
-                logger.info(
-                    message="Worker execution completed",
-                    event_type="worker.execution.completed",
-                    metadata={
-                        "queue_name": queue_name,
-                        "duration_ms": duration_ms,
-                    },
-                )
-
+                    
                 return result
             
             return async_wrapper
@@ -187,24 +188,26 @@ def worker_logging_handler(
 
                     raise
 
+                else:
+                
+                    duration_ms = round(
+                        (time.perf_counter() - start_time) * 1000,
+                        3,
+                    )
+
+                    logger.info(
+                        message="Worker execution completed",
+                        event_type="worker.execution.completed",
+                        metadata={
+                            "queue_name": queue_name,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+
                 finally: 
 
                     TraceContext.end_trace()
                 
-                duration_ms = round(
-                    (time.perf_counter() - start_time) * 1000,
-                    3,
-                )
-
-                logger.info(
-                    message="Worker execution completed",
-                    event_type="worker.execution.completed",
-                    metadata={
-                        "queue_name": queue_name,
-                        "duration_ms": duration_ms,
-                    },
-                )
-
                 return result
             
             return sync_wrapper
