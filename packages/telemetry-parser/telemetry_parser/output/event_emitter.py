@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Callable
 
 from telemetry_parser.output.structured_event import StructuredEvent
@@ -53,7 +54,7 @@ class EventEmitter:
         """
 
         if not self.preserve_event_ids and self.id_provider is not None:
-            event.event_id = self.id_provider()
+            event = replace(event, event_id=self.id_provider())
 
         if self.on_emit:
             self.on_emit(event)
