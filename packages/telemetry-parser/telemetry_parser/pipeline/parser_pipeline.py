@@ -4,7 +4,7 @@ from telemetry_parser.observability.parser_observer import ParserObserver
 from telemetry_parser.stream.tcp_reassembler import TCPReassembler, TCPPacket
 from telemetry_parser.protocol.message_decoder import MessageDecoder
 from telemetry_parser.protocol.sip_parser import SIPParser
-from telemetry_parser.extraction.event_extractor import EventExtractor
+from telemetry_parser.extraction.event_extractor import EventExtractor, UnsupportedProtocolEvent
 from telemetry_parser.normalisation.event_normaliser import EventNormaliser
 from telemetry_parser.output.event_emitter import EventEmitter
 from telemetry_parser.output.structured_event import StructuredEvent
@@ -85,7 +85,10 @@ class ParserPipeline:
                     if sip_message is None:
                         continue
 
-                    extracted = self.extractor.extract(sip_message)
+                    try:
+                        extracted = self.extractor.extract(sip_message)
+                    except UnsupportedProtocolEvent:
+                        continue
 
                     if extracted is None:
                         continue
@@ -124,7 +127,10 @@ class ParserPipeline:
                 if sip_message is None:
                     continue
 
-                extracted = self.extractor.extract(sip_message)
+                try:
+                    extracted = self.extractor.extract(sip_message)
+                except UnsupportedProtocolEvent:
+                    continue
 
                 if extracted is None:
                     continue
@@ -147,7 +153,10 @@ class ParserPipeline:
         if sip_message is None:
             return
 
-        extracted = self.extractor.extract(sip_message)
+        try:
+            extracted = self.extractor.extract(sip_message)
+        except UnsupportedProtocolEvent:
+            return
 
         if extracted is None:
             return
