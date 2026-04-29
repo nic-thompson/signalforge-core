@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Iterable, Tuple
-import uuid
 
 from telemetry_parser.observability.parser_observer import ParserObserver
 
@@ -130,16 +129,16 @@ class SessionTracker:
         if session:
             session.close(timestamp)
 
-        if self.observer and session.start_timestamp:
+            if self.observer:
 
-            duration = (
-                timestamp - session.start_timestamp
-            ).total_seconds()
+                duration = (
+                    timestamp - session.start_timestamp
+                ).total_seconds()
 
-            self.observer.on_session_end(
-                session.session_id,
-                duration,
-            )
+                self.observer.on_session_end(
+                    session.session_id,
+                    duration,
+                )
 
     def active_sessions(self) -> Iterable[TCPSession]:
 
