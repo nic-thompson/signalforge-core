@@ -1,13 +1,9 @@
 import structured_logging.adapters.lambda_adapter as module_under_test
 from structured_logging.adapters.lambda_adapter import lambda_logging_handler
 from unittest.mock import MagicMock, patch
-import types
- 
+
 import pytest
 
-from structured_logging.adapters.lambda_adapter import lambda_logging_handler
-
-from structured_logging.adapters.lambda_adapter import _safe_event_metadata
 
 class DummyContext:
     function_name = "test-function"
@@ -28,16 +24,13 @@ def test_cold_start_logged_once():
         return {"ok": True}
 
     event = {}
-
     context = DummyContext()
 
     # First invocation (should trigger cold start)
     handler(event, context)
 
-
     # Second invocation (should NOT trigger cold start)
     handler(event, context)
-
 
     # Extract emitted event types
     emitted_event_types = [
@@ -63,7 +56,7 @@ def test_invocation_started_logged_each_call():
     @lambda_logging_handler(logger=mock_logger, log_event_metadata=True)
     def handler(event, context):
         return {"ok": True}
-    
+
     event = {
         "source": "aws.events",
         "id": "event-id",
@@ -97,7 +90,7 @@ def test_invocation_completed_logged():
     @lambda_logging_handler(logger=mock_logger)
     def handler(event, context):
         return {"ok": True}
-    
+
     event = {}
     context = DummyContext()
 
@@ -123,7 +116,7 @@ def test_invocation_completed_logged():
 def test_exception_emits_failure_event():
     """
     Ensure lambda.invocation.failure is emitted when handler raises,
-    and the exception is re-raised afer logging.
+    and the exception is re-raised after logging.
     """
 
     # Reset cold-start state for deterministic behaviour
@@ -137,14 +130,14 @@ def test_exception_emits_failure_event():
     @lambda_logging_handler(logger=mock_logger)
     def handler(event, context):
         raise TestException("boom")
-    
+
     event = {}
     context = DummyContext()
 
     with pytest.raises(TestException):
         handler(event, context)
 
-    # Verify emit_error called exaclty once
+    # Verify emit_error called exactly once
     assert mock_logger.emit_error.call_count == 1
 
     call = mock_logger.emit_error.call_args
@@ -162,7 +155,7 @@ def test_exception_emits_failure_event():
 def test_trace_started_when_missing():
     """
     Ensure TraceContext.start_trace() is called when no existing trace
-    content is present.
+    context is present.
     """
 
     module_under_test._COLD_START = True
@@ -177,11 +170,11 @@ def test_trace_started_when_missing():
     ) as mock_start_trace, patch(
         "structured_logging.adapters.lambda_adapter.TraceContext.child_trace"
     ) as mock_child_trace:
-        
+
         @lambda_logging_handler(logger=mock_logger)
         def handler(event, context):
             return {"ok": True}
-        
+
         handler({}, DummyContext())
 
         mock_get.assert_called_once()
@@ -204,24 +197,26 @@ def test_child_trace_when_present():
 
     with patch(
         "structured_logging.adapters.lambda_adapter.TraceContext.get",
-        return_value=object(), # Simulate existing trace context
+        return_value=object(),  # Simulate existing trace context
     ) as mock_get, patch(
         "structured_logging.adapters.lambda_adapter.TraceContext.start_trace"
     ) as mock_start_trace, patch(
         "structured_logging.adapters.lambda_adapter.TraceContext.child_trace"
     ) as mock_child_trace:
-        
+
         @lambda_logging_handler(logger=mock_logger)
         def handler(event, context):
             return {"ok": True}
-        
-        handler({}, DummyContext)
+
+        # Fix: instantiate DummyContext rather than passing the class
+        handler({}, DummyContext())
 
         mock_get.assert_called_once()
         mock_child_trace.assert_called_once_with(
             pipeline_stage="lambda_invocation"
         )
-        mock_start_trace.assert_not_called
+        # Fix: assert_not_called() must be called, not referenced as an attribute
+        mock_start_trace.assert_not_called()
 
 
 def test_trace_propagation_attempt_for_dict_event():
@@ -237,11 +232,11 @@ def test_trace_propagation_attempt_for_dict_event():
     with patch(
         "structured_logging.adapters.lambda_adapter.TracePropagation.extract_headers"
     ) as mock_extract_headers:
-        
+
         @lambda_logging_handler(logger=mock_logger)
         def handler(event, context):
             return {"ok": True}
-        
+
         event = {"headers": {"x-trace-id": "abc"}}
         handler(event, DummyContext())
 
@@ -260,17 +255,17 @@ def test_trace_propagation_not_attempted_for_non_dict_event():
 
     with patch(
         "structured_logging.adapters.lambda_adapter.TracePropagation.extract_headers"
-    ) as mock_axctract_headers:
-        
+    ) as mock_extract_headers:
+
         @lambda_logging_handler(logger=mock_logger)
         def handler(event, context):
-            return("ok", True)
+            return ("ok", True)
 
         event = "not-a-dict-event"
 
         handler(event, DummyContext())
 
-        mock_axctract_headers.assert_not_called()
+        mock_extract_headers.assert_not_called()
 
 
 def test_safe_event_metadata_filters_payload():
@@ -288,7 +283,7 @@ def test_safe_event_metadata_filters_payload():
         # Unsafe / unexpected keys
         "password": "secret",
         "token": "abc123",
-        "payload": {"sensitive": True}
+        "payload": {"sensitive": True},
     }
 
     metadata = _safe_event_metadata(event)
@@ -302,7 +297,7 @@ def test_safe_event_metadata_filters_payload():
         "account": "123456789012",
     }
 
-    # Explicitly verify sensitivie fields were exluded
+    # Explicitly verify sensitive fields were excluded
     assert "password" not in metadata
     assert "token" not in metadata
     assert "payload" not in metadata
