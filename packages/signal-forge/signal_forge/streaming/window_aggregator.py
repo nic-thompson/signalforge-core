@@ -122,7 +122,7 @@ class Aggregation(Protocol, Generic[StateT, ResultT]):
     new state. This is what enables window repair: re-applying an
     event to a window's state is just another ``combine`` call.
 
-    ``finalize`` converts internal state into the externally-emitted
+    ``finalise`` converts internal state into the externally-emitted
     value. For ``count`` and ``sum`` the state and result are the same;
     for future aggregations like ``mean`` they will differ
     (state = (sum, n), result = sum / n).
@@ -132,7 +132,7 @@ class Aggregation(Protocol, Generic[StateT, ResultT]):
 
     def initial(self) -> StateT: ...
     def combine(self, state: StateT, contribution: Any) -> StateT: ...
-    def finalize(self, state: StateT) -> ResultT: ...
+    def finalise(self, state: StateT) -> ResultT: ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -150,7 +150,7 @@ class CountAggregation:
     def combine(self, state: int, contribution: Any) -> int:
         return state + 1
 
-    def finalize(self, state: int) -> int:
+    def finalise(self, state: int) -> int:
         return state
 
 
@@ -173,7 +173,7 @@ class SumAggregation:
             )
         return state + float(contribution)
 
-    def finalize(self, state: float) -> float:
+    def finalise(self, state: float) -> float:
         return state
 
 
@@ -340,7 +340,7 @@ class WindowAggregator:
                         aggregation_name=self._agg.name,
                         window_start=window_start,
                         window_end=window_end,
-                        value=self._agg.finalize(state.state),
+                        value=self._agg.finalise(state.state),
                         event_count=state.event_count,
                         is_repair=True,
                     )
@@ -428,7 +428,7 @@ class WindowAggregator:
                         aggregation_name=self._agg.name,
                         window_start=window_start,
                         window_end=window_end,
-                        value=self._agg.finalize(state.state),
+                        value=self._agg.finalise(state.state),
                         event_count=state.event_count,
                         is_repair=False,
                     )
