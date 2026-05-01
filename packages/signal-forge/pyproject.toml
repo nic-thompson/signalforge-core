@@ -13,9 +13,9 @@ readme = "README.md"
 # bloating the analytics core.
 dependencies = [
     "pydantic>=2.7,<3",
-    "event-schema-contracts>=0.1.0",
-    "structured-logging-python>=0.1.0",
-    "telemetry-parser>=0.1.0",
+    "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@1c8c33ba960678a79733c90f63383c1759014387",
+    "structured-logging-python @ git+https://github.com/nic-thompson/structured-logging-python@00f97c737f40b03f9a73d964d642c532cf6af16e",
+    "telemetry-parser @ git+https://github.com/nic-thompson/telemetry-parser@ce84ed069695c858b0813aaeb05ce8b2f4c11ef1",
 ]
 
 [project.optional-dependencies]
@@ -66,7 +66,7 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "C4", "PTH", "SIM", "RUF"]
+select = ["E", "F", "W", "I", "UP", "B", "BLE", "C4", "PTH", "SIM", "RUF"]
 ignore = ["B008"]
 
 # ----------------------------------------------------------------------

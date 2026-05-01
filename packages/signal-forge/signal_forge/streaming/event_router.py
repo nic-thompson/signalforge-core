@@ -59,7 +59,6 @@ from typing import Final
 from signal_forge.streaming.event_protocol import TelemetryEvent
 from signal_forge.streaming.observability import StructuredLoggerLike, get_logger
 
-
 # Type alias for handlers. A handler accepts an event and returns nothing —
 # any output it produces is the handler's own concern (writing to a sink,
 # updating an aggregator, etc.).
@@ -121,12 +120,15 @@ def _resolve_compatible_key(
     """
 
     try:
-        from event_schema_contracts.versioning.compatibility import parse_version
+        from event_schema_contracts.versioning.compatibility import (
+            SchemaVersion,
+            parse_version,
+        )
     except ImportError:
         return _resolve_compatible_key_fallback(requested, registered_keys)
 
     requested_version = parse_version(requested.schema_version)
-    candidates: list[tuple[object, RouteKey]] = []
+    candidates: list[tuple[SchemaVersion, RouteKey]] = []
 
     for key in registered_keys:
         if key.event_type != requested.event_type:
@@ -321,7 +323,7 @@ class EventRouter:
             try:
                 handler(event)
                 invoked += 1
-            except Exception as exc:  # noqa: BLE001 — failure isolation by design
+            except Exception as exc:
                 failures += 1
                 self._logger.error(
                     "Handler raised during dispatch",

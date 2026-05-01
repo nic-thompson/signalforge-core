@@ -23,7 +23,6 @@ import os
 from dataclasses import dataclass, field, replace
 from typing import Final
 
-
 # ---------------------------------------------------------------------------
 # Production-safe defaults
 # ---------------------------------------------------------------------------
@@ -120,7 +119,7 @@ class PlatformSettings:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_env(cls, env: dict[str, str] | None = None) -> "PlatformSettings":
+    def from_env(cls, env: dict[str, str] | None = None) -> PlatformSettings:
         """
         Build settings from environment variables.
 
@@ -152,7 +151,7 @@ class PlatformSettings:
             environment=source.get("SF_ENV", "dev"),
         )
 
-    def for_replay(self, replay_environment: str = "replay") -> "PlatformSettings":
+    def for_replay(self, replay_environment: str = "replay") -> PlatformSettings:
         """
         Return a copy of these settings tagged for a replay run.
 

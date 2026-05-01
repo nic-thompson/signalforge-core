@@ -10,9 +10,10 @@ structurally.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Mapping
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 
@@ -43,7 +44,7 @@ class FakeEvent:
     payload: Any = None
     event_id: UUID = field(default_factory=uuid4)
     ingest_timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(UTC)
     )
     trace: FakeTrace = field(default_factory=FakeTrace)
     metadata: FakeMetadata = field(init=False)

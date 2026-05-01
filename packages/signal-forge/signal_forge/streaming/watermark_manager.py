@@ -49,14 +49,13 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Final
-
 
 # Sentinel epoch used as the "no events seen yet" baseline. Chosen as
 # datetime.min in UTC so that any real telemetry timestamp is strictly
 # greater. Frozen as a module constant to avoid per-call construction.
-_EPOCH_BASELINE: Final[datetime] = datetime.min.replace(tzinfo=timezone.utc)
+_EPOCH_BASELINE: Final[datetime] = datetime.min.replace(tzinfo=UTC)
 
 
 class EventClassification(enum.Enum):
@@ -227,8 +226,8 @@ class WatermarkManager:
         # ``late_by`` is strictly positive here. Within the budget the
         # event is tolerated; beyond it, dropped. Note that with
         # lateness=0 every late event falls into LATE_DROPPED, because
-        # ``late_by > timedelta(0)`` whenever event_timestamp 
-        # previous_watermark.
+        # ``late_by > timedelta(0)`` whenever event_timestamp is older
+        # than previous_watermark.
         if late_by <= self._lateness and self._lateness > timedelta(0):
             return EventClassification.LATE_TOLERATED
         return EventClassification.LATE_DROPPED

@@ -15,14 +15,13 @@ depends on it.
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from signal_forge.streaming.event_protocol import (
     EventMetadataLike,
     TelemetryEvent,
     TraceContextLike,
 )
-
 from tests._fixtures.events import FakeEvent
 
 
@@ -31,7 +30,7 @@ class TelemetryEventProtocolTest(unittest.TestCase):
         event = FakeEvent(
             event_type="device.registration",
             schema_version="v1",
-            event_timestamp=datetime(2026, 4, 30, tzinfo=timezone.utc),
+            event_timestamp=datetime(2026, 4, 30, tzinfo=UTC),
         )
         self.assertIsInstance(event, TelemetryEvent)
 
@@ -39,7 +38,7 @@ class TelemetryEventProtocolTest(unittest.TestCase):
         event = FakeEvent(
             event_type="device.registration",
             schema_version="v1",
-            event_timestamp=datetime(2026, 4, 30, tzinfo=timezone.utc),
+            event_timestamp=datetime(2026, 4, 30, tzinfo=UTC),
         )
         self.assertIsInstance(event.metadata, EventMetadataLike)
 
@@ -47,7 +46,7 @@ class TelemetryEventProtocolTest(unittest.TestCase):
         event = FakeEvent(
             event_type="device.registration",
             schema_version="v1",
-            event_timestamp=datetime(2026, 4, 30, tzinfo=timezone.utc),
+            event_timestamp=datetime(2026, 4, 30, tzinfo=UTC),
         )
         self.assertIsInstance(event.trace, TraceContextLike)
 
@@ -62,4 +61,3 @@ class TelemetryEventProtocolTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-    

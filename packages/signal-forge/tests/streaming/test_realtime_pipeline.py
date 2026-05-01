@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from signal_forge.streaming.event_router import EventRouter
 from signal_forge.streaming.realtime_pipeline import (
@@ -39,12 +39,11 @@ from signal_forge.streaming.window_aggregator import (
     WindowAggregator,
     WindowSpec,
 )
-
 from tests._fixtures.events import FakeEvent, RecordingLogger
 
 
 def epoch_aligned(seconds_since_epoch: int) -> datetime:
-    return datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(
+    return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(
         seconds=seconds_since_epoch
     )
 
@@ -277,7 +276,7 @@ class BatchProcessingTest(unittest.TestCase):
         self.assertTrue(all(r.classification == EventClassification.ON_TIME for r in results))
 
     def test_process_batch_emits_summary_with_correct_counters(self):
-        pipeline, rec, _router, _agg = make_pipeline()
+        _pipeline, _rec, _router, _agg = make_pipeline()
 
         # Three events: two ON_TIME, one with no payload that fails extraction
         # (using a payload-aware extractor on this run only).

@@ -41,18 +41,15 @@ from __future__ import annotations
 
 import bisect
 import dataclasses
-import enum
 import math
-from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Generic, Protocol, TypeVar
 
 from signal_forge.streaming.watermark_manager import EventClassification
 
-
 # Epoch baseline used for boundary arithmetic. Windows are aligned to
 # (event_timestamp - epoch).total_seconds() // slide_seconds.
-_EPOCH: datetime = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH: datetime = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +107,7 @@ class WindowSpec:
 
 
 StateT = TypeVar("StateT")
-ResultT = TypeVar("ResultT")
+ResultT = TypeVar("ResultT", covariant=True)
 
 
 class Aggregation(Protocol, Generic[StateT, ResultT]):
@@ -241,7 +238,7 @@ class WindowAggregator:
         self,
         *,
         spec: WindowSpec,
-        aggregation: Aggregation,
+        aggregation: Aggregation[Any, Any],
         lateness_tolerance_seconds: int,
     ) -> None:
         if lateness_tolerance_seconds < 0:

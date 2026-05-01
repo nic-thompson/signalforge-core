@@ -19,7 +19,6 @@ from __future__ import annotations
 import unittest
 
 from signal_forge.streaming.observability import get_logger
-
 from tests._fixtures.events import RecordingLogger
 
 

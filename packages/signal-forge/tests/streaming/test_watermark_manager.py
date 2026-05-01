@@ -14,8 +14,9 @@ Covers:
 
 from __future__ import annotations
 
+import itertools
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from signal_forge.streaming.watermark_manager import (
     EventClassification,
@@ -25,7 +26,7 @@ from signal_forge.streaming.watermark_manager import (
 
 def utc(seconds_since_epoch: int) -> datetime:
     """Helper: build a UTC datetime at a fixed offset from a known anchor."""
-    return datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc) + timedelta(
+    return datetime(2026, 4, 30, 12, 0, 0, tzinfo=UTC) + timedelta(
         seconds=seconds_since_epoch
     )
 
@@ -142,7 +143,7 @@ class WatermarkMonotonicityTest(unittest.TestCase):
         watermarks = [o.watermark for o in observations]
 
         # Each watermark must be >= the previous one.
-        for prev, cur in zip(watermarks, watermarks[1:]):
+        for prev, cur in itertools.pairwise(watermarks):
             self.assertGreaterEqual(cur, prev)
 
     def test_high_event_timestamp_only_advances(self):

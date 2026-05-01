@@ -17,10 +17,9 @@ Covers:
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from signal_forge.streaming.event_router import EventRouter, RouteKey
-
 from tests._fixtures.events import FakeEvent, RecordingLogger
 
 
@@ -28,7 +27,7 @@ def _make_event(event_type: str, schema_version: str) -> FakeEvent:
     return FakeEvent(
         event_type=event_type,
         schema_version=schema_version,
-        event_timestamp=datetime(2026, 4, 30, 12, 0, 0, tzinfo=timezone.utc),
+        event_timestamp=datetime(2026, 4, 30, 12, 0, 0, tzinfo=UTC),
     )
 
 

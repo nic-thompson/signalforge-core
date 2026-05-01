@@ -22,7 +22,8 @@ more belongs in the upstream library itself.
 from __future__ import annotations
 
 import logging
-from typing import Any, Mapping, Protocol
+from collections.abc import Mapping
+from typing import Any, Protocol, cast
 
 
 class StructuredLoggerLike(Protocol):
@@ -123,4 +124,4 @@ def get_logger(name: str) -> StructuredLoggerLike:
     except ImportError:
         return _StdlibFallbackLogger(name)
 
-    return StructuredLogger(name)
+    return cast(StructuredLoggerLike, StructuredLogger(name))

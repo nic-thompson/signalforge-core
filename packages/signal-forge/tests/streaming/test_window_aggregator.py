@@ -19,7 +19,7 @@ Covers:
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from signal_forge.streaming.watermark_manager import EventClassification
 from signal_forge.streaming.window_aggregator import (
@@ -34,14 +34,14 @@ from signal_forge.streaming.window_aggregator import (
 def utc(seconds_since_anchor: int) -> datetime:
     """Anchor: 2026-04-30 12:00:00 UTC, deliberately not slide-aligned to
     catch tests that accidentally rely on alignment with the anchor."""
-    return datetime(2026, 4, 30, 12, 0, 7, tzinfo=timezone.utc) + timedelta(
+    return datetime(2026, 4, 30, 12, 0, 7, tzinfo=UTC) + timedelta(
         seconds=seconds_since_anchor
     )
 
 
 def epoch_aligned(seconds_since_epoch: int) -> datetime:
     """Build a UTC datetime at exactly N seconds past the Unix epoch."""
-    return datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=seconds_since_epoch)
+    return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds_since_epoch)
 
 
 # ---------------------------------------------------------------------------

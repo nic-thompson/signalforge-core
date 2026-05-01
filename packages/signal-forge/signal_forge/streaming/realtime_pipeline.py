@@ -54,13 +54,11 @@ from signal_forge.streaming.observability import StructuredLoggerLike, get_logge
 from signal_forge.streaming.watermark_manager import (
     EventClassification,
     WatermarkManager,
-    WatermarkObservation,
 )
 from signal_forge.streaming.window_aggregator import (
     WindowAggregator,
     WindowEmission,
 )
-
 
 # Type alias: a partition extractor takes an event and returns a string
 # key. Production extractors will read payload fields (store_id,
@@ -236,7 +234,7 @@ class RealtimePipeline:
             partition_key = self._extract(event)
             if not partition_key:
                 raise ValueError("partition extractor returned empty key")
-        except Exception as exc:  # noqa: BLE001 — failure isolation by design
+        except Exception as exc:
             self._logger.error(
                 "Partition extraction failed",
                 event_type=_LOG_EVENT_EXTRACTION_ERROR,
@@ -279,7 +277,7 @@ class RealtimePipeline:
                     watermark=observation.watermark,
                 )
                 all_emissions.extend(emissions)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 self._logger.error(
                     "Aggregator raised during observe()",
                     event_type=_LOG_EVENT_AGGREGATION_ERROR,
