@@ -1,8 +1,8 @@
-from typing import ClassVar
+from typing import Any, ClassVar
 from collections.abc import Sequence
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 class UUIDv4Model(BaseModel):
     """
@@ -13,14 +13,14 @@ class UUIDv4Model(BaseModel):
 
     __uuid_v4_fields__: ClassVar[tuple[str, ...]] = ()
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not isinstance(cls.__uuid_v4_fields__, tuple):
             raise TypeError("__uuid_v4_fields__ must be tuple[str, ...]")
 
     @field_validator("*", check_fields=False)
     @classmethod
-    def validate_uuid_fields(cls, value, info):
+    def validate_uuid_fields(cls, value: Any, info: ValidationInfo) -> Any:
         
         if info.field_name not in cls.__uuid_v4_fields__:
             return value
