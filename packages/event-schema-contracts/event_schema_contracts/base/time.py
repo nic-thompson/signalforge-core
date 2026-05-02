@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 class UTCTimestampModel(BaseModel):
     """
@@ -12,14 +12,14 @@ class UTCTimestampModel(BaseModel):
 
     __utc_fields__: ClassVar[tuple[str, ...]] = ()
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not isinstance(cls.__utc_fields__, tuple):
             raise TypeError("__utc_fields__ must be tuple[str, ...]")
 
     @field_validator("*", check_fields=False)
     @classmethod
-    def validate_utc_fields(cls, value: Any, info):
+    def validate_utc_fields(cls, value: Any, info: ValidationInfo) -> Any:
         
         if (
             isinstance(value, datetime)

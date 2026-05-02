@@ -1,5 +1,5 @@
-from typing import ClassVar
-from pydantic import BaseModel, field_validator
+from typing import Any, ClassVar
+from pydantic import BaseModel, ValidationInfo, field_validator
 import re
 
 
@@ -21,7 +21,7 @@ class SemVerModel(BaseModel):
 
     @field_validator("*", check_fields=False)
     @classmethod
-    def validate_semver_fields(cls, value, info):
+    def validate_semver_fields(cls, value: Any, info: ValidationInfo) -> Any:
 
         if info.field_name not in cls.__semver_fields__:
             return value

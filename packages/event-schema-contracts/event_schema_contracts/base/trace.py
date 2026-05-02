@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, model_validator
@@ -43,7 +44,7 @@ class TraceContext(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def default_root_trace(cls, data):
+    def default_root_trace(cls, data: Any) -> Any:
         if isinstance(data, dict) and data.get("root_trace_id") is None:
             data["root_trace_id"] = data.get("trace_id")
         return data

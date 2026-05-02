@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from typing import Generic, TypeVar, ClassVar
+from typing import Any, Generic, Self, TypeVar, ClassVar
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -40,7 +40,7 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
     # Schema registration enforcement
     # ------------------------------------------------------------------
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
 
         # Ignore abstract base + generic wrapper classes
@@ -130,7 +130,7 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
 
     @model_validator(mode="before")
     @classmethod
-    def inject_metadata(cls, data):
+    def inject_metadata(cls, data: Any) -> Any:
         """
         Automatically inject metadata if missing.
         """
@@ -152,7 +152,7 @@ class BaseEvent(BaseModel, Generic[PayloadT]):
     # ------------------------------------------------------------------
 
     @model_validator(mode="after")
-    def validate_model(self):
+    def validate_model(self) -> Self:
         """
         Validate schema identity + timestamp ordering.
         """
