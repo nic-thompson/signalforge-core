@@ -1,0 +1,459 @@
+"""
+Tests for signal_forge.streaming.window_aggregator.
+
+Covers:
+
+- WindowSpec validation (size, slide, divisibility, gapless)
+- tumbling window basic correctness
+- sliding window overlap (size=60, slide=15) — every event in 4 windows
+- epoch-relative window alignment (replay determinism, cross-shard joins)
+- watermark-driven emission (no premature emit)
+- late-event repair (re-emission with is_repair=True)
+- LATE_DROPPED events do not affect aggregations
+- per-key isolation (one key's late event never affects another's)
+- sealing horizon evicts state past watermark + lateness
+- chronological emission order across multiple closing windows
+- determinism: identical event sequences produce identical emissions
+"""
+
+from __future__ import annotations
+
+import unittest
+from datetime import UTC, datetime, timedelta
+
+from signal_forge.streaming.watermark_manager import EventClassification
+from signal_forge.streaming.window_aggregator import (
+    CountAggregation,
+    SumAggregation,
+    WindowAggregator,
+    WindowEmission,
+    WindowSpec,
+)
+
+
+def utc(seconds_since_anchor: int) -> datetime:
+    """Anchor: 2026-04-30 12:00:00 UTC, deliberately not slide-aligned to
+    catch tests that accidentally rely on alignment with the anchor."""
+    return datetime(2026, 4, 30, 12, 0, 7, tzinfo=UTC) + timedelta(
+        seconds=seconds_since_anchor
+    )
+
+
+def epoch_aligned(seconds_since_epoch: int) -> datetime:
+    """Build a UTC datetime at exactly N seconds past the Unix epoch."""
+    return datetime(1970, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds_since_epoch)
+
+
+# ---------------------------------------------------------------------------
+# WindowSpec validation
+# ---------------------------------------------------------------------------
+
+
+class WindowSpecTest(unittest.TestCase):
+    def test_rejects_zero_size(self):
+        with self.assertRaises(ValueError):
+            WindowSpec(size_seconds=0, slide_seconds=5)
+
+    def test_rejects_zero_slide(self):
+        with self.assertRaises(ValueError):
+            WindowSpec(size_seconds=60, slide_seconds=0)
+
+    def test_rejects_slide_greater_than_size(self):
+        with self.assertRaises(ValueError):
+            WindowSpec(size_seconds=10, slide_seconds=20)
+
+    def test_rejects_non_divisible_slide(self):
+        with self.assertRaises(ValueError):
+            WindowSpec(size_seconds=60, slide_seconds=7)
+
+    def test_tumbling_property(self):
+        self.assertTrue(WindowSpec(size_seconds=5, slide_seconds=5).is_tumbling)
+        self.assertFalse(WindowSpec(size_seconds=60, slide_seconds=15).is_tumbling)
+
+
+# ---------------------------------------------------------------------------
+# Tumbling windows — basic correctness
+# ---------------------------------------------------------------------------
+
+
+class TumblingWindowTest(unittest.TestCase):
+    def setUp(self):
+        self.agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=CountAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+
+    def test_no_emission_before_watermark_passes_window_end(self):
+        # Event at t, watermark at t+1 — window [floor(t/5)*5, +5) is
+        # not yet closed.
+        ts = epoch_aligned(102)  # window start 100, end 105
+        wm = epoch_aligned(103)
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=ts,
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=wm,
+        )
+        self.assertEqual(emissions, [])
+
+    def test_emits_when_watermark_passes_window_end(self):
+        # First event in [100, 105) with watermark inside the window —
+        # no emission yet.
+        emissions_open = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(103),
+        )
+        self.assertEqual(emissions_open, [])
+
+        # Second event lands in [105, 110) with watermark=110. Two
+        # windows close on this call:
+        #   - [100, 105) which contained the first event (count=1)
+        #   - [105, 110) which contains the second event (count=1)
+        # because the watermark sits on the right edge of [105, 110).
+        # Both must emit, in chronological window-start order.
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(106),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        self.assertEqual(len(emissions), 2)
+
+        first, second = emissions
+        self.assertEqual(first.window_start, epoch_aligned(100))
+        self.assertEqual(first.window_end, epoch_aligned(105))
+        self.assertEqual(first.value, 1)
+        self.assertFalse(first.is_repair)
+
+        self.assertEqual(second.window_start, epoch_aligned(105))
+        self.assertEqual(second.window_end, epoch_aligned(110))
+        self.assertEqual(second.value, 1)
+        self.assertFalse(second.is_repair)
+
+    def test_window_boundaries_are_epoch_relative(self):
+        # An event at epoch+127 belongs to window [125, 130). With a
+        # watermark already at 135 the window's right edge has been
+        # crossed, so the window emits on the SAME observe() call —
+        # not on a later one.
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(127),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(135),
+        )
+
+        # Exactly one emission, with a window aligned to the Unix epoch
+        # and not to the test anchor. This is what guarantees cross-
+        # shard joinability for downstream datasets.
+        self.assertEqual(len(emissions), 1)
+        emission = emissions[0]
+        self.assertEqual(emission.window_start, epoch_aligned(125))
+        self.assertEqual(emission.window_end, epoch_aligned(130))
+        self.assertEqual(emission.value, 1)
+        self.assertFalse(emission.is_repair)
+
+# ---------------------------------------------------------------------------
+# Sliding windows
+# ---------------------------------------------------------------------------
+
+
+class SlidingWindowTest(unittest.TestCase):
+    def test_event_belongs_to_size_over_slide_windows(self):
+        # size=60, slide=15 -> 4 overlapping windows.
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=60, slide_seconds=15),
+            aggregation=CountAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+
+        # Event at epoch+72. Windows containing it are starts at 60, 45, 30, 15.
+        agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(72),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(72),
+        )
+        self.assertEqual(agg.open_window_count("store-1"), 4)
+
+    def test_sliding_emissions_in_chronological_order(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=60, slide_seconds=15),
+            aggregation=CountAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+        # Single event placed at t=72. Windows [15,75), [30,90), [45,105), [60,120).
+        agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(72),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(72),
+        )
+        # Advance the watermark past the latest window end (120).
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(200),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(200),
+        )
+        # All four overlapping windows should now have closed. The event
+        # at t=200 also opens new windows; filter to the four containing 72.
+        relevant_starts = {15, 30, 45, 60}
+        relevant = [
+            e for e in emissions
+            if int((e.window_start - epoch_aligned(0)).total_seconds()) in relevant_starts
+        ]
+        self.assertEqual(len(relevant), 4)
+        # And they emit in chronological window-start order.
+        starts_in_order = [e.window_start for e in relevant]
+        self.assertEqual(starts_in_order, sorted(starts_in_order))
+
+
+# ---------------------------------------------------------------------------
+# Late-event repair
+# ---------------------------------------------------------------------------
+
+
+class LateEventRepairTest(unittest.TestCase):
+    def setUp(self):
+        self.agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=CountAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+
+    def test_late_tolerated_event_triggers_repair_emission(self):
+        # Event in window [100, 105) emits when watermark passes 105.
+        self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(102),
+        )
+        emissions_initial = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions_initial if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        self.assertEqual(first_closure[0].value, 1)
+        self.assertFalse(first_closure[0].is_repair)
+
+        # Now a LATE_TOLERATED event lands in window [100, 105) — well
+        # within the 60s lateness budget at watermark=110.
+        repairs = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(103),
+            contribution=None,
+            classification=EventClassification.LATE_TOLERATED,
+            watermark=epoch_aligned(110),
+        )
+        repair_emissions = [e for e in repairs if e.is_repair]
+        self.assertEqual(len(repair_emissions), 1)
+        self.assertEqual(repair_emissions[0].window_start, epoch_aligned(100))
+        self.assertEqual(repair_emissions[0].value, 2)
+        self.assertEqual(repair_emissions[0].event_count, 2)
+
+    def test_late_dropped_event_does_not_repair_or_aggregate(self):
+        self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(102),
+        )
+        self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        # Watermark advances far enough that the [100,105) window is now
+        # past its sealing horizon (105 + 60 = 165).
+        repairs = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(103),
+            contribution=None,
+            classification=EventClassification.LATE_DROPPED,
+            watermark=epoch_aligned(170),
+        )
+        # No repairs — LATE_DROPPED is silently ignored for aggregation.
+        self.assertEqual([e for e in repairs if e.is_repair], [])
+
+
+# ---------------------------------------------------------------------------
+# Per-key isolation
+# ---------------------------------------------------------------------------
+
+
+class PerKeyIsolationTest(unittest.TestCase):
+    def test_one_keys_late_event_does_not_affect_another(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=CountAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+
+        agg.observe(
+            partition_key="store-A",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        agg.observe(
+            partition_key="store-B",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+
+        # Late event for store-A only.
+        emissions = agg.observe(
+            partition_key="store-A",
+            event_timestamp=epoch_aligned(103),
+            contribution=None,
+            classification=EventClassification.LATE_TOLERATED,
+            watermark=epoch_aligned(110),
+        )
+        self.assertTrue(all(e.partition_key == "store-A" for e in emissions))
+
+
+# ---------------------------------------------------------------------------
+# Sealing horizon
+# ---------------------------------------------------------------------------
+
+
+class SealingHorizonTest(unittest.TestCase):
+    def test_state_is_evicted_past_lateness_horizon(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=CountAggregation(),
+            lateness_tolerance_seconds=10,
+        )
+        agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(102),
+        )
+        self.assertEqual(agg.open_window_count("store-1"), 1)
+
+        # Window [100, 105). Sealing horizon = 105 + 10 = 115.
+        agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(120),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(120),
+        )
+        # Window [100, 105) should now be sealed and evicted; only the new
+        # window [120, 125) is open.
+        self.assertEqual(agg.open_window_count("store-1"), 1)
+
+
+# ---------------------------------------------------------------------------
+# SumAggregation
+# ---------------------------------------------------------------------------
+
+
+class SumAggregationTest(unittest.TestCase):
+    def test_sum_accumulates_numeric_contributions(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=SumAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+        for value in (1.5, 2.0, 0.5):
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution=value,
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution=0.0,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        self.assertEqual(first_closure[0].value, 4.0)
+        self.assertEqual(first_closure[0].event_count, 3)
+
+    def test_sum_rejects_non_numeric_contribution(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=SumAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+        with self.assertRaises(TypeError):
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution="not-numeric",
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
+
+
+class DeterminismTest(unittest.TestCase):
+    def test_identical_inputs_yield_identical_emissions(self):
+        events = [
+            ("store-A", epoch_aligned(102), EventClassification.ON_TIME, epoch_aligned(102)),
+            ("store-A", epoch_aligned(106), EventClassification.ON_TIME, epoch_aligned(106)),
+            ("store-B", epoch_aligned(103), EventClassification.ON_TIME, epoch_aligned(106)),
+            ("store-A", epoch_aligned(112), EventClassification.ON_TIME, epoch_aligned(112)),
+            ("store-A", epoch_aligned(104), EventClassification.LATE_TOLERATED, epoch_aligned(112)),
+        ]
+
+        def run() -> list[WindowEmission]:
+            agg = WindowAggregator(
+                spec=WindowSpec(size_seconds=5, slide_seconds=5),
+                aggregation=CountAggregation(),
+                lateness_tolerance_seconds=60,
+            )
+            out: list[WindowEmission] = []
+            for key, ts, cls, wm in events:
+                out.extend(
+                    agg.observe(
+                        partition_key=key,
+                        event_timestamp=ts,
+                        contribution=None,
+                        classification=cls,
+                        watermark=wm,
+                    )
+                )
+            return out
+
+        run1 = run()
+        run2 = run()
+        self.assertEqual(run1, run2)
+
+
+if __name__ == "__main__":
+    unittest.main()
