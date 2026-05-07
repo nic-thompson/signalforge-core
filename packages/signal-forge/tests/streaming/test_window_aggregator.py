@@ -455,5 +455,135 @@ class DeterminismTest(unittest.TestCase):
         self.assertEqual(run1, run2)
 
 
+# ---------------------------------------------------------------------------
+# Trace-id propagation
+# ---------------------------------------------------------------------------
+
+
+class TraceIdPropagationTest(unittest.TestCase):
+    """
+    Trace-id propagation through window aggregation.
+
+    Phase 2 emission detectors derive ``DetectionEvent.trace`` from
+    the most recent contributing event's trace_id, surfaced via
+    ``WindowEmission.last_contributing_trace_id``. These tests pin that
+    contract:
+
+    - the field carries the contributor's trace_id on first-time closure
+    - the field carries the most recent contributor's trace_id when
+      multiple events contribute to the same window
+    - late-event repair emissions carry the late event's trace_id
+      (the most-recent-contributor semantics)
+    """
+
+    def setUp(self):
+        # Tumbling 5s windows. Lateness 60s gives plenty of room for
+        # repair scenarios.
+        self.agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=CountAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+
+    def test_closure_emission_carries_last_contributing_trace_id(self):
+        # Single event in window [100, 105). Watermark advances past
+        # the window end to trigger closure.
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(102),
+            trace_id="trace-A",
+        )
+        # No emission yet — watermark hasn't passed window_end.
+        self.assertEqual(emissions, [])
+
+        # Advance watermark past window_end with an event in the next window.
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(106),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(106),
+            trace_id="trace-B",
+        )
+        # The closing window [100, 105) carries trace-A from its sole
+        # contributor. The new event (trace-B) belongs to the next
+        # window and does not affect the closing emission.
+        self.assertEqual(len(emissions), 1)
+        self.assertEqual(emissions[0].window_start, epoch_aligned(100))
+        self.assertEqual(emissions[0].last_contributing_trace_id, "trace-A")
+
+    def test_multiple_contributions_keep_most_recent_trace_id(self):
+        # Three events in the same window [100, 105). Each carries a
+        # different trace_id. The last one wins.
+        for ts_offset, trace in [(101, "trace-A"), (102, "trace-B"), (103, "trace-C")]:
+            self.agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(ts_offset),
+                contribution=None,
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(ts_offset),
+                trace_id=trace,
+            )
+
+        # Advance watermark past window end to trigger closure.
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(106),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(106),
+            trace_id="trace-D",
+        )
+
+        # The closure carries trace-C (the most recent contribution to
+        # window [100, 105)), not trace-D (which belongs to the next
+        # window).
+        self.assertEqual(len(emissions), 1)
+        self.assertEqual(emissions[0].event_count, 3)
+        self.assertEqual(emissions[0].last_contributing_trace_id, "trace-C")
+
+    def test_repair_emission_carries_most_recent_trace_id(self):
+        # First-time closure of window [100, 105) with one ON_TIME event.
+        self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(102),
+            trace_id="trace-original",
+        )
+        # Advance watermark to close the window.
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(106),
+            contribution=None,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(106),
+            trace_id="trace-other-window",
+        )
+        self.assertEqual(len(emissions), 1)
+        self.assertEqual(emissions[0].is_repair, False)
+        self.assertEqual(emissions[0].last_contributing_trace_id, "trace-original")
+
+        # Now a LATE_TOLERATED event arrives for the closed window.
+        # Repair re-emission should carry the late event's trace_id.
+        emissions = self.agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(103),
+            contribution=None,
+            classification=EventClassification.LATE_TOLERATED,
+            watermark=epoch_aligned(110),
+            trace_id="trace-late",
+        )
+        # One repair emission for the closed window.
+        repairs = [e for e in emissions if e.is_repair]
+        self.assertEqual(len(repairs), 1)
+        self.assertEqual(repairs[0].last_contributing_trace_id, "trace-late")
+        self.assertEqual(repairs[0].event_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
