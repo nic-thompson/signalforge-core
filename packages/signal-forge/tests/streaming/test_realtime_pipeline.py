@@ -23,6 +23,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from signal_forge.streaming.event_router import EventRouter
 from signal_forge.streaming.realtime_pipeline import (
@@ -39,7 +40,13 @@ from signal_forge.streaming.window_aggregator import (
     WindowAggregator,
     WindowSpec,
 )
-from tests._fixtures.events import FakeEvent, RecordingLogger
+from tests._fixtures.detectors import (
+    FakeEmissionDetector,
+    FakeEventDetector,
+    RaisingEmissionDetector,
+    RaisingEventDetector,
+)
+from tests._fixtures.events import FakeEvent, FakeTrace, RecordingLogger
 
 
 def epoch_aligned(seconds_since_epoch: int) -> datetime:
@@ -355,6 +362,248 @@ class DeterminismTest(unittest.TestCase):
         self.assertEqual(
             [(r.classification, len(r.emissions)) for r in ra],
             [(r.classification, len(r.emissions)) for r in rb],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Detector dispatch
+# ---------------------------------------------------------------------------
+
+
+class EventDetectorDispatchTest(unittest.TestCase):
+    """
+    Tests for ``register_event_detector`` and event-detector dispatch in
+    ``RealtimePipeline.process()``.
+
+    Verifies three things at once: that a registered event detector
+    observes every event passed through ``process()``, that its emitted
+    detections appear in ``ProcessingResult.detections``, and that the
+    detection collection is order-preserving (each event's detections
+    appear in the result for that event, not aggregated across events).
+    """
+
+    def test_registered_event_detector_observes_events_and_detections_flow_back(self):
+        pipeline, _, _, _ = make_pipeline()
+        detector = FakeEventDetector(detections_per_observation=1)
+        pipeline.register_event_detector(detector)
+
+        # Build a single event and process it. The fake detector emits
+        # one detection per observation, so we expect to see exactly
+        # one detection on the result.
+        event = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(102),
+        )
+        result = pipeline.process(event)
+
+        # Detector saw the event.
+        self.assertEqual(len(detector.observations), 1)
+        self.assertIs(detector.observations[0], event)
+
+        # Detection flowed back through ProcessingResult.
+        self.assertEqual(len(result.detections), 1)
+        # Sanity check: the detection is well-formed (not a placeholder).
+        self.assertEqual(
+            result.detections[0].payload.detection_type,
+            "device.offline",  # FakeEventDetector emits this type
+        )
+
+    def test_multiple_event_detectors_each_observe_and_contribute_detections(self):
+        # Two detectors, registered in order A then B. Both should
+        # observe the same event; both detections should appear in
+        # ProcessingResult.detections.
+        pipeline, _, _, _ = make_pipeline()
+        detector_a = FakeEventDetector(detections_per_observation=1)
+        detector_b = FakeEventDetector(detections_per_observation=1)
+        pipeline.register_event_detector(detector_a)
+        pipeline.register_event_detector(detector_b)
+
+        event = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(102),
+        )
+        result = pipeline.process(event)
+
+        # Both detectors observed the event exactly once.
+        self.assertEqual(len(detector_a.observations), 1)
+        self.assertEqual(len(detector_b.observations), 1)
+        self.assertIs(detector_a.observations[0], event)
+        self.assertIs(detector_b.observations[0], event)
+
+        # Both detections appear in the result.
+        self.assertEqual(len(result.detections), 2)
+
+    def test_event_detector_failure_does_not_block_other_detectors(self):
+        # A raising event detector should be logged and skipped; other
+        # detectors continue to observe the same event, and their
+        # detections still flow back through ProcessingResult.
+        pipeline, rec, _, _ = make_pipeline()
+        raising = RaisingEventDetector()
+        survivor = FakeEventDetector(detections_per_observation=1)
+        pipeline.register_event_detector(raising)
+        pipeline.register_event_detector(survivor)
+
+        event = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(102),
+        )
+        # process() returns normally — the raising detector did not
+        # propagate. If it had, this line would raise.
+        result = pipeline.process(event)
+
+        # The survivor observed the event and contributed its detection.
+        self.assertEqual(len(survivor.observations), 1)
+        self.assertEqual(len(result.detections), 1)
+
+        # The failure was logged. by_event_type filters to the
+        # pipeline.detector_error records emitted by the dispatch loop.
+        errors = rec.by_event_type("pipeline.detector_error")
+        self.assertEqual(len(errors), 1)
+        # Metadata identifies the failing detector by name and kind.
+        self.assertEqual(errors[0].metadata["detector"], "RaisingEventDetector")
+        self.assertEqual(errors[0].metadata["detector_kind"], "event")
+
+class EmissionDetectorDispatchTest(unittest.TestCase):
+    """
+    Tests for ``register_emission_detector`` and emission-detector
+    dispatch in ``RealtimePipeline.process()``.
+
+    Emission detectors are subscribed by ``aggregation_name``. The fake
+    used here uses ``aggregation_name = "count"`` matching
+    ``make_pipeline``'s default aggregator, so a default-constructed
+    fake receives emissions from the default test pipeline.
+
+    Emissions only fire when a window closes (watermark crosses the
+    window's right edge), so each test processes two events: the first
+    contributes to the window, the second advances the watermark past
+    its end.
+    """
+
+    def test_registered_emission_detector_observes_window_emissions(self):
+        pipeline, _, _, _ = make_pipeline()
+        detector = FakeEmissionDetector()
+        pipeline.register_emission_detector(detector)
+
+        # Event in window [100, 105). Watermark at 102 - 60 = 42 (still
+        # below the window's right edge), so no emission yet.
+        first = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(102),
+        )
+        result = pipeline.process(first)
+        self.assertEqual(len(detector.observations), 0)
+        self.assertEqual(result.detections, [])
+
+        # Event at 106 advances the watermark past window_end (105),
+        # closing window [100, 105) and emitting once.
+        second = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(166),  # watermark = 166 - 60 = 106
+        )
+        result = pipeline.process(second)
+
+        # The emission detector saw the closure.
+        self.assertEqual(len(detector.observations), 1)
+        emission = detector.observations[0]
+        self.assertEqual(emission.aggregation_name, "count")
+        self.assertEqual(emission.partition_key, "test-source")
+        # Detection flowed back through the second process() call's
+        # ProcessingResult.
+        self.assertEqual(len(result.detections), 1)
+
+    def test_emission_detector_failure_does_not_block_other_detectors(self):
+        # A raising emission detector should be logged and skipped;
+        # other emission detectors subscribed to the same
+        # aggregation_name still observe the emission, and their
+        # detections still flow back.
+        pipeline, rec, _, _ = make_pipeline()
+        raising = RaisingEmissionDetector()
+        survivor = FakeEmissionDetector()
+        pipeline.register_emission_detector(raising)
+        pipeline.register_emission_detector(survivor)
+
+        # Event in window [100, 105). No closure yet.
+        first = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(102),
+        )
+        result = pipeline.process(first)
+        self.assertEqual(len(survivor.observations), 0)
+        self.assertEqual(result.detections, [])
+
+        # Event at 166 advances watermark to 106, closing window
+        # [100, 105). Both detectors are dispatched; raising one fails,
+        # survivor observes.
+        second = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(166),
+        )
+        result = pipeline.process(second)
+
+        # The survivor observed the closure and contributed.
+        self.assertEqual(len(survivor.observations), 1)
+        self.assertEqual(len(result.detections), 1)
+
+        # The failure was logged with full lineage.
+        errors = rec.by_event_type("pipeline.detector_error")
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0].metadata["detector"], "RaisingEmissionDetector")
+        self.assertEqual(errors[0].metadata["detector_kind"], "emission")
+        self.assertEqual(errors[0].metadata["aggregation_name"], "count")
+
+    def test_emission_detector_receives_last_contributing_trace_id(self):
+        # Pins the trace-propagation contract from commit fe7034f:
+        # the trace_id of an event that contributes to a window is
+        # carried, via _WindowState, onto the eventual WindowEmission's
+        # last_contributing_trace_id field, where an emission detector
+        # can read it for lineage.
+        pipeline, _, _, _ = make_pipeline()
+        detector = FakeEmissionDetector()
+        pipeline.register_emission_detector(detector)
+
+        # Construct an event with a deliberately set trace_id, so the
+        # assertion below has a known value to check against. The
+        # pipeline converts the UUID to its string form when passing
+        # trace_id into aggregator.observe(), so the field we assert
+        # on is the string form.
+        known_trace_id = uuid4()
+        first = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(102),
+            trace=FakeTrace(trace_id=known_trace_id),
+        )
+        pipeline.process(first)
+        self.assertEqual(len(detector.observations), 0)
+
+        # Second event with an unrelated trace_id, advances the
+        # watermark past the first window's end. The first window
+        # closes; its emission should carry the FIRST event's
+        # trace_id (the most-recent contributor), not the second's.
+        second = FakeEvent(
+            event_type="device.registration",
+            schema_version="v1",
+            event_timestamp=epoch_aligned(166),
+        )
+        pipeline.process(second)
+
+        # Exactly one closure emission observed.
+        self.assertEqual(len(detector.observations), 1)
+        emission = detector.observations[0]
+
+        # The contributing event's trace_id is on the emission, in
+        # string form (the pipeline converts at the aggregator
+        # boundary).
+        self.assertEqual(
+            emission.last_contributing_trace_id,
+            str(known_trace_id),
         )
 
 
