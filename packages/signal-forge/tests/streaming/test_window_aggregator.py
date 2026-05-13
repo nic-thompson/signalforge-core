@@ -24,6 +24,7 @@ from datetime import UTC, datetime, timedelta
 from signal_forge.streaming.watermark_manager import EventClassification
 from signal_forge.streaming.window_aggregator import (
     CountAggregation,
+    DistinctCountAggregation,
     SumAggregation,
     WindowAggregator,
     WindowEmission,
@@ -414,6 +415,118 @@ class SumAggregationTest(unittest.TestCase):
                 classification=EventClassification.ON_TIME,
                 watermark=epoch_aligned(102),
             )
+
+
+class DistinctCountAggregationTest(unittest.TestCase):
+    def test_empty_window_finalises_to_zero(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=DistinctCountAggregation(key=lambda c: c),
+            lateness_tolerance_seconds=60,
+        )
+        # One event opens window [100, 105) with a distinct value;
+        # then advance watermark to close.
+        agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution="device-a",
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(102),
+        )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution="device-b",
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        # The closed window has cardinality 1 (just "device-a").
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        self.assertEqual(first_closure[0].value, 1)
+
+    def test_duplicate_contributions_dedupe(self):
+        # Three events with the same device_id. Cardinality is 1.
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=DistinctCountAggregation(key=lambda c: c),
+            lateness_tolerance_seconds=60,
+        )
+        for _ in range(3):
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution="device-a",
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution="device-z",
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        self.assertEqual(first_closure[0].value, 1)
+        # event_count is the count of observations, which is 3 — even
+        # though the cardinality is 1. Pinning the distinction here so
+        # a future reader sees the two counters are separate concerns.
+        self.assertEqual(first_closure[0].event_count, 3)
+
+    def test_distinct_contributions_count_separately(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=DistinctCountAggregation(key=lambda c: c),
+            lateness_tolerance_seconds=60,
+        )
+        for device in ("device-a", "device-b", "device-c"):
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution=device,
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution="device-z",
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        self.assertEqual(first_closure[0].value, 3)
+
+    def test_key_extractor_is_applied_to_each_contribution(self):
+        # Contributions are dicts; the key extracts a specific field.
+        # If the extractor were ignored (e.g. dict added to a set
+        # directly), this would raise TypeError on unhashable type.
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=DistinctCountAggregation(key=lambda c: c["device_id"]),
+            lateness_tolerance_seconds=60,
+        )
+        for device in ("a", "b", "a"):  # 'a' duplicated
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution={"device_id": device, "other_field": "noise"},
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution={"device_id": "z"},
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        self.assertEqual(first_closure[0].value, 2)  # 'a' and 'b'
 
 
 # ---------------------------------------------------------------------------

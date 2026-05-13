@@ -42,6 +42,7 @@ from __future__ import annotations
 import bisect
 import dataclasses
 import math
+from collections.abc import Callable, Hashable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -172,6 +173,41 @@ class SumAggregation:
 
     def finalise(self, state: float) -> float:
         return state
+
+
+@dataclasses.dataclass(frozen=True)
+class DistinctCountAggregation:
+    """
+    Counts distinct values extracted from contributions. Useful for
+    ``distinct_devices_per_store`` and similar cardinality measures.
+
+    The ``key`` callable maps each contribution to a hashable value;
+    the aggregation's state is the set of keys seen so far in the
+    window, and finalisation returns its cardinality.
+
+    The explicit ``key`` parameter forces callers to declare what is
+    being counted (which field of which payload), rather than relying
+    on payload equality semantics that can drift silently as schemas
+    evolve. If two payloads should count as the same device, they
+    should produce the same ``key(payload)`` value.
+    """
+
+    key: Callable[[Any], Hashable]
+    name: str = "distinct_count"
+
+    def initial(self) -> set[Hashable]:
+        return set()
+
+    def combine(self, state: set[Hashable], contribution: Any) -> set[Hashable]:
+        # Mutate in place and return — the aggregator stores whatever we
+        # return as the next state. CountAggregation and SumAggregation
+        # construct new values; sets allow O(1) update without
+        # allocation churn at fleet scale.
+        state.add(self.key(contribution))
+        return state
+
+    def finalise(self, state: set[Hashable]) -> int:
+        return len(state)
 
 
 # ---------------------------------------------------------------------------
