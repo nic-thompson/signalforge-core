@@ -42,6 +42,7 @@ from __future__ import annotations
 import bisect
 import dataclasses
 import math
+from collections.abc import Callable, Hashable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -174,6 +175,41 @@ class SumAggregation:
         return state
 
 
+@dataclasses.dataclass(frozen=True)
+class DistinctCountAggregation:
+    """
+    Counts distinct values extracted from contributions. Useful for
+    ``distinct_devices_per_store`` and similar cardinality measures.
+
+    The ``key`` callable maps each contribution to a hashable value;
+    the aggregation's state is the set of keys seen so far in the
+    window, and finalisation returns its cardinality.
+
+    The explicit ``key`` parameter forces callers to declare what is
+    being counted (which field of which payload), rather than relying
+    on payload equality semantics that can drift silently as schemas
+    evolve. If two payloads should count as the same device, they
+    should produce the same ``key(payload)`` value.
+    """
+
+    key: Callable[[Any], Hashable]
+    name: str = "distinct_count"
+
+    def initial(self) -> set[Hashable]:
+        return set()
+
+    def combine(self, state: set[Hashable], contribution: Any) -> set[Hashable]:
+        # Mutate in place and return — the aggregator stores whatever we
+        # return as the next state. CountAggregation and SumAggregation
+        # construct new values; sets allow O(1) update without
+        # allocation churn at fleet scale.
+        state.add(self.key(contribution))
+        return state
+
+    def finalise(self, state: set[Hashable]) -> int:
+        return len(state)
+
+
 # ---------------------------------------------------------------------------
 # Emission record
 # ---------------------------------------------------------------------------
@@ -187,6 +223,13 @@ class WindowEmission:
     Emitted both for initial closure (when the watermark first crosses
     the window's right edge) and for late-event repair (when a
     LATE_TOLERATED event updates an already-emitted window).
+
+    ``last_contributing_trace_id`` carries the ``trace_id`` of the most
+    recent event that contributed to the window. Phase 2 emission
+    detectors use this to propagate trace lineage from contributing
+    telemetry events to derived ``DetectionEvent``s. ``None`` when the
+    aggregator was called without a ``trace_id`` (e.g. from tests that
+    do not exercise trace propagation).
     """
 
     partition_key: str
@@ -196,6 +239,7 @@ class WindowEmission:
     value: Any
     event_count: int
     is_repair: bool
+    last_contributing_trace_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +254,7 @@ class _WindowState:
     state: Any
     event_count: int
     has_emitted: bool
+    last_contributing_trace_id: str | None = None
 
 
 class WindowAggregator:
@@ -266,6 +311,7 @@ class WindowAggregator:
         contribution: Any,
         classification: EventClassification,
         watermark: datetime,
+        trace_id: str | None = None,
     ) -> list[WindowEmission]:
         """
         Apply an event to all windows it belongs to and return any
@@ -278,6 +324,12 @@ class WindowAggregator:
         ``LATE_DROPPED`` events are ignored — the upstream watermark
         manager has already decided they are too late to influence
         aggregations.
+
+        ``trace_id`` is recorded on each window the event contributes
+        to, surviving across watermark advances so that the eventual
+        emission carries the most recent contributor's trace lineage.
+        Pass ``None`` (the default) when not exercising trace
+        propagation.
         """
 
         if not partition_key:
@@ -327,6 +379,7 @@ class WindowAggregator:
             # is_repair=True.
             state.state = self._agg.combine(state.state, contribution)
             state.event_count += 1
+            state.last_contributing_trace_id = trace_id
 
             if classification is EventClassification.LATE_TOLERATED and state.has_emitted:
                 # Re-emit immediately for repair. The window is still
@@ -340,6 +393,7 @@ class WindowAggregator:
                         value=self._agg.finalise(state.state),
                         event_count=state.event_count,
                         is_repair=True,
+                        last_contributing_trace_id=state.last_contributing_trace_id,
                     )
                 )
 
@@ -428,6 +482,7 @@ class WindowAggregator:
                         value=self._agg.finalise(state.state),
                         event_count=state.event_count,
                         is_repair=False,
+                        last_contributing_trace_id=state.last_contributing_trace_id,
                     )
                 )
                 state.has_emitted = True

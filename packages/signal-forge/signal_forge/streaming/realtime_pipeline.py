@@ -48,6 +48,9 @@ import dataclasses
 from collections.abc import Callable, Iterable
 from typing import Final
 
+from event_schema_contracts.detection import DetectionEvent
+
+from signal_forge.detection.protocols import EmissionDetector, EventDetector
 from signal_forge.streaming.event_protocol import TelemetryEvent
 from signal_forge.streaming.event_router import EventRouter
 from signal_forge.streaming.observability import StructuredLoggerLike, get_logger
@@ -71,6 +74,7 @@ PartitionExtractor = Callable[[TelemetryEvent], str]
 _LOG_EVENT_PROCESSED: Final[str] = "pipeline.processed"
 _LOG_EVENT_EXTRACTION_ERROR: Final[str] = "pipeline.extraction_error"
 _LOG_EVENT_AGGREGATION_ERROR: Final[str] = "pipeline.aggregation_error"
+_LOG_EVENT_DETECTOR_ERROR: Final[str] = "pipeline.detector_error"
 _LOG_EVENT_BATCH_SUMMARY: Final[str] = "pipeline.batch_summary"
 
 
@@ -87,7 +91,15 @@ class ProcessingResult:
     Returned to the caller for routing emissions and for tests asserting
     pipeline behaviour without inspecting the logger. Includes the
     watermark observation and any emissions produced across all
-    registered aggregators.
+    registered aggregators and any detection events produced by
+    registered detectors.
+
+    The ``detections`` list collects detections in deterministic order:
+    event-detector outputs first (in registration order), then
+    emission-detector outputs (per emission, then registration order
+    within that emission). Replay determinism is preserved provided
+    every detector itself observes the determinism contract documented
+    in ``signal_forge.detection.protocols``.
     """
 
     event_id: str
@@ -96,6 +108,7 @@ class ProcessingResult:
     handlers_invoked: int
     handler_failures: int
     emissions: list[WindowEmission]
+    detections: list[DetectionEvent]
     extraction_failed: bool
 
 
@@ -191,6 +204,13 @@ class RealtimePipeline:
         # ordering is required for replay determinism.
         self._aggregators: list[tuple[str, WindowAggregator]] = []
 
+        # Event detectors observe every event in registration order.
+        # Emission detectors are keyed by ``aggregation_name`` for O(1)
+        # dispatch lookup per emission; within a key, they observe in
+        # registration order.
+        self._event_detectors: list[EventDetector] = []
+        self._emission_detectors: dict[str, list[EmissionDetector]] = {}
+
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
@@ -213,6 +233,32 @@ class RealtimePipeline:
             raise ValueError(f"aggregator already registered: {name}")
         self._aggregators.append((name, aggregator))
 
+    def register_event_detector(self, detector: EventDetector) -> None:
+        """
+        Register an event detector.
+
+        The detector observes every event dispatched through the
+        pipeline, after the router has run. Multiple event detectors
+        may be registered; each observes every event in registration
+        order. A failing detector is logged and skipped; other
+        detectors still observe the same event.
+        """
+        self._event_detectors.append(detector)
+
+    def register_emission_detector(self, detector: EmissionDetector) -> None:
+        """
+        Register an emission detector.
+
+        The detector observes ``WindowEmission``s whose
+        ``aggregation_name`` matches ``detector.aggregation_name``.
+        Multiple emission detectors may be registered against the same
+        ``aggregation_name``; within that group, they observe each
+        emission in registration order. A failing detector is logged
+        and skipped; other detectors still observe the same emission.
+        """
+        bucket = self._emission_detectors.setdefault(detector.aggregation_name, [])
+        bucket.append(detector)
+
     # ------------------------------------------------------------------
     # Processing
     # ------------------------------------------------------------------
@@ -223,7 +269,10 @@ class RealtimePipeline:
 
         Returns a ``ProcessingResult`` summarising what happened.
         Emissions in the result come from all registered aggregators,
-        in registration order.
+        in registration order. Detections come from all registered
+        detectors: event-detector outputs first (registration order),
+        then emission-detector outputs (per emission, then registration
+        order within that emission).
         """
 
         trace_id = str(event.trace.trace_id)
@@ -256,6 +305,7 @@ class RealtimePipeline:
                 handlers_invoked=0,
                 handler_failures=0,
                 emissions=[],
+                detections=[],
                 extraction_failed=True,
             )
 
@@ -275,6 +325,7 @@ class RealtimePipeline:
                     contribution=event.payload,
                     classification=observation.classification,
                     watermark=observation.watermark,
+                    trace_id=trace_id,
                 )
                 all_emissions.extend(emissions)
             except Exception as exc:
@@ -299,7 +350,58 @@ class RealtimePipeline:
         # at the router level, not here).
         dispatch_result = self._router.dispatch(event)
 
-        # ── 5. Single structured log line summarising the event ────────
+        # ── 5. Detector dispatch ───────────────────────────────────────
+        # Event detectors observe the event after the router has run;
+        # detection is conceptually a synthesis step downstream of
+        # dispatch. Emission detectors observe each window emission
+        # produced in step 3, routed by aggregation_name. Per-detector
+        # failure isolation: a raising detector is logged and skipped,
+        # other detectors continue to observe the same input.
+        all_detections: list[DetectionEvent] = []
+
+        for event_detector in self._event_detectors:
+            try:
+                all_detections.extend(event_detector.observe_event(event))
+            except Exception as exc:
+                self._logger.error(
+                    "Event detector raised during observe_event()",
+                    event_type=_LOG_EVENT_DETECTOR_ERROR,
+                    trace_id=trace_id,
+                    metadata={
+                        "event_id": event_id,
+                        "detector": event_detector.name,
+                        "detector_kind": "event",
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                    },
+                )
+                if self._strict:
+                    raise
+
+        for emission in all_emissions:
+            for emission_detector in self._emission_detectors.get(
+                emission.aggregation_name, []
+            ):
+                try:
+                    all_detections.extend(emission_detector.observe_emission(emission))
+                except Exception as exc:
+                    self._logger.error(
+                        "Emission detector raised during observe_emission()",
+                        event_type=_LOG_EVENT_DETECTOR_ERROR,
+                        trace_id=trace_id,
+                        metadata={
+                            "event_id": event_id,
+                            "detector": emission_detector.name,
+                            "detector_kind": "emission",
+                            "aggregation_name": emission.aggregation_name,
+                            "exception_type": type(exc).__name__,
+                            "exception_message": str(exc),
+                        },
+                    )
+                    if self._strict:
+                        raise
+
+        # ── 6. Single structured log line summarising the event ────────
         self._logger.info(
             "Processed event through pipeline",
             event_type=_LOG_EVENT_PROCESSED,
@@ -313,9 +415,9 @@ class RealtimePipeline:
                 "handlers_invoked": dispatch_result.handlers_invoked,
                 "handler_failures": dispatch_result.handler_failures,
                 "emissions": len(all_emissions),
+                "detections": len(all_detections),
             },
         )
-
         return ProcessingResult(
             event_id=event_id,
             partition_key=partition_key,
@@ -323,6 +425,7 @@ class RealtimePipeline:
             handlers_invoked=dispatch_result.handlers_invoked,
             handler_failures=dispatch_result.handler_failures,
             emissions=all_emissions,
+            detections=all_detections,
             extraction_failed=False,
         )
 
@@ -344,6 +447,7 @@ class RealtimePipeline:
         late_dropped = 0
         extraction_failures = 0
         total_emissions = 0
+        total_detections = 0
 
         for event in events:
             result = self.process(event)
@@ -359,6 +463,7 @@ class RealtimePipeline:
                 late_dropped += 1
 
             total_emissions += len(result.emissions)
+            total_detections += len(result.detections)
 
         self._logger.info(
             "Processed event batch",
@@ -371,6 +476,7 @@ class RealtimePipeline:
                 "late_dropped": late_dropped,
                 "extraction_failures": extraction_failures,
                 "emissions": total_emissions,
+                "detections": total_detections,
             },
         )
 
