@@ -10,10 +10,13 @@ from event_schema_contracts.base.base_event import BaseEvent
 from event_schema_contracts.base.domain import DomainEventPayload
 from event_schema_contracts.base.versioning import SemVerModel
 
+STORE_ID_PATTERN = r"^[a-z0-9]+([.\-_][a-z0-9]+)*$"
+
 class DeviceType(str, Enum):
     SENSOR = "SENSOR"
     GATEWAY = "GATEWAY"
     EDGE_NODE = "EDGE_NODE"
+
 
 class DeviceRegistrationPayload(
     DomainEventPayload,
@@ -38,6 +41,13 @@ class DeviceRegistrationPayload(
     device_id: UUID = Field(
         ...,
         description="Globally unique device identifier."
+    )
+
+    store_id: str = Field(
+        ...,
+        description="Store identifier this device belongs to.",
+        pattern=STORE_ID_PATTERN,
+        min_length=1,
     )
 
     device_type: DeviceType
