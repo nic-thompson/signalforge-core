@@ -23,10 +23,12 @@ class FakeDevicePayload:
     """
     Minimal device-shaped payload exposing a UUID device_id.
 
-    Mirrors the field name and type used by
+    Mirrors a subset of fields from
     ``event_schema_contracts.telemetry.DeviceRegistrationPayload``
-    so detector extractors written against the real payload work
-    against this fake too.
+    relevant to detector extractor tests. The real payload now also
+    carries ``store_id`` (since v0.3.0) and other fields; tests that
+    need those construct the real payload directly, or use a
+    different fake.
     """
 
     device_id: UUID
