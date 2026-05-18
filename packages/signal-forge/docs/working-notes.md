@@ -213,6 +213,23 @@ Discriminator pattern: single schema, `detection_type: str` + `details: dict[str
 
 **Alternative considered:** Track *all* contributing trace_ids on the window state. Rejected because memory cost (a list per window) and we never lookup by trace anyway — the most-recent-contributor is the right narrowing.
 
+#### D-10: Callable injection is the right pattern for cross-phase deferrals, but the production data path must be sketched first
+
+When a future-phase component (e.g. `DeviceRegistry`) isn't ready yet, the current phase's consumers (e.g. `OfflineDetector`, `OutageDetector`) take a constructor `Callable[..., ...]` for the missing capability. Tests fill the callable with a hand-built dict or lambda; production wiring happens in the later phase. This is what we did in Phase 2 with `store_lookup` and `registered_count_lookup`, deferring `DeviceRegistry` to Phase 3.
+
+**Why:** Callable injection decouples phases. The consumer's interface is fixed by the abstract shape (e.g. `Callable[[UUID], str | None]`), not by the concrete implementation that comes later. Detectors stay testable in isolation and the later phase can build the real implementation without rewriting the consumer.
+
+**The hidden cost we encountered:** Test fakes can fill interfaces that production data cannot. Phase 2's tests built `store_lookup` from `{"store-1": 50}` dicts; we never asked "where does this dict come from in production?". When Phase 3 began designing `DeviceRegistry`, we discovered `DeviceRegistrationPayload` didn't carry `store_id` at all — the production projection wasn't expressible from the upstream event stream as it stood. The cost was small (upstream PR, SHA bump) because it surfaced before any further work depended on it. Caught later — after Phase 5 alert routing and Phase 6 dashboards had been built — it would have meant rewriting the registration mechanism, re-running every producer, and re-validating downstream consumers.
+
+**The lesson:** Before accepting a callable-injection deferral, do a 5-minute "design the production path enough to confirm it's possible" check. Specifically: trace the data the callable would need in production back to its source. If that source doesn't exist (the field isn't on the upstream schema, the event type isn't defined, the projection isn't deterministically computable), fix the gap *before* shipping the consumer — even though the consumer can technically be shipped with the test fake intact.
+
+**Trade-off considered:** Refusing all deferrals — every phase ships the production implementations end-to-end. Rejected because it serialises work that can run in parallel and forces upstream contract evolution earlier than necessary. The callable-injection pattern remains correct; only the discipline around accepting it changes.
+
+**Alternative considered:** Documenting the deferred-design risk in working-notes at the time of deferral, so the future phase's first task is to verify the production path. Equivalent in effect to the lesson above but more administrative. Either form works; what matters is that the verification happens before the deferred work is committed against.
+
+This entry exists because the Phase 3 / `DeviceRegistry` design caught the gap at a non-catastrophic moment. The pattern of "callable injection without production-path verification" is the kind of disciplined-looking-but-actually-risky default that's worth flagging in the decision log so future phases don't repeat it.
+
+
 ## Known issues
 
 Things we know about and have decided how to handle.
