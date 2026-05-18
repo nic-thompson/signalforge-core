@@ -18,15 +18,26 @@ detection:
   are skipped silently — no emission, no state mutation.
 - The defensive clamp: reporting_count > registered_count is treated
   as 0 offline rather than negative.
+
+The detector's registered_count_lookup callable is wired to a real
+DeviceRegistry populated from registration events, replacing the
+hand-built dict that Phase 2's tests used. Behaviour is unchanged;
+the wiring is what's being verified. The outage detector doesn't
+actually need a real registry (any callable satisfies it), but
+using the registry here keeps the codebase consistent in how
+detector tests express their "device-store world".
 """
 
 from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from signal_forge.detection.detectors import OutageDetector
+from signal_forge.detection.device_registry import DeviceRegistry
 from signal_forge.streaming.window_aggregator import WindowEmission
+from tests._fixtures.registration import make_registration_event
 
 
 def _emission(
@@ -59,14 +70,37 @@ def _emission(
     )
 
 
+def _populate_registry(
+    registry: DeviceRegistry,
+    *,
+    counts: dict[str, int],
+) -> None:
+    """
+    Register ``count`` anonymous devices in each named store.
+
+    The outage detector cares about device counts per store, not
+    about specific device identities, so anonymous fresh UUIDs are
+    sufficient. Using the registry rather than a dict keeps the
+    "build the device-store world from registration events" pattern
+    consistent across detector tests, even where it's not strictly
+    necessary.
+    """
+    for store_id, count in counts.items():
+        for _ in range(count):
+            registry.observe_registration(
+                make_registration_event(device_id=uuid4(), store_id=store_id)
+            )
+
+
 class OutageDetectorTest(unittest.TestCase):
     def setUp(self) -> None:
         # 50 registered devices in store-1, 10 in store-2.
-        self.registry = {"store-1": 50, "store-2": 10}
+        self.registry = DeviceRegistry()
+        _populate_registry(self.registry, counts={"store-1": 50, "store-2": 10})
         # Threshold 0.5 = "more than 50% offline triggers".
         self.detector = OutageDetector(
             threshold_ratio=0.5,
-            registered_count_lookup=lambda s: self.registry.get(s),
+            registered_count_lookup=self.registry.device_count,
         )
 
     def test_below_threshold_does_not_emit(self):
@@ -187,17 +221,21 @@ class OutageDetectorTest(unittest.TestCase):
         )
 
     def test_unregistered_store_does_not_emit(self):
-        # Store "store-unknown" is not in the registry; lookup returns
-        # None. No detection, no state mutation.
+        # Store "store-unknown" is not in the registry; device_count
+        # returns 0. No detection, no state mutation.
         detections = self.detector.observe_emission(
             _emission(store_id="store-unknown", reporting_count=0)
         )
         self.assertEqual(detections, [])
 
     def test_zero_registered_devices_does_not_emit(self):
-        # Store with 0 registered devices (edge case from registry
-        # synchronisation). No meaningful ratio; skip.
-        self.registry["store-empty"] = 0
+        # A store with 0 registered devices in the registry is
+        # indistinguishable from an unregistered store — both return
+        # device_count = 0. The dict-based fixture in Phase 2 could
+        # distinguish "known but empty" from "unknown"; with a real
+        # registry they collapse to the same case. The detector's
+        # behaviour is correct: device_count returning 0 short-
+        # circuits the ratio computation.
         detections = self.detector.observe_emission(
             _emission(store_id="store-empty", reporting_count=0)
         )
@@ -216,12 +254,12 @@ class OutageDetectorTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             OutageDetector(
                 threshold_ratio=0.0,
-                registered_count_lookup=lambda s: 10,
+                registered_count_lookup=self.registry.device_count,
             )
 
     def test_threshold_validation_rejects_one(self):
         with self.assertRaises(ValueError):
             OutageDetector(
                 threshold_ratio=1.0,
-                registered_count_lookup=lambda s: 10,
+                registered_count_lookup=self.registry.device_count,
             )
