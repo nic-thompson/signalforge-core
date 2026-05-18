@@ -25,6 +25,7 @@ from signal_forge.streaming.watermark_manager import EventClassification
 from signal_forge.streaming.window_aggregator import (
     CountAggregation,
     DistinctCountAggregation,
+    MeanAggregation,
     SumAggregation,
     WindowAggregator,
     WindowEmission,
@@ -527,6 +528,120 @@ class DistinctCountAggregationTest(unittest.TestCase):
         first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
         self.assertEqual(len(first_closure), 1)
         self.assertEqual(first_closure[0].value, 2)  # 'a' and 'b'
+
+
+class MeanAggregationTest(unittest.TestCase):
+    def test_finalise_on_initial_state_returns_zero(self):
+        # Unit test for the defensive count > 0 guard in finalise().
+        # This case isn't reachable through the integration path (the
+        # aggregator only creates window state when an event arrives,
+        # which increments count), but the guard exists in the code
+        # and we pin its behaviour so a future refactor can't quietly
+        # turn it into a ZeroDivisionError.
+        agg = MeanAggregation()
+        self.assertEqual(agg.finalise(agg.initial()), 0.0)
+
+    def test_single_contribution_mean_equals_contribution(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=MeanAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+        agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(102),
+            contribution=7.5,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(102),
+        )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution=0.0,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        self.assertEqual(first_closure[0].value, 7.5)
+        self.assertEqual(first_closure[0].event_count, 1)
+
+    def test_multiple_contributions_arithmetic_mean(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=MeanAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+        for value in (1.0, 2.0, 3.0, 4.0, 5.0):
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution=value,
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution=0.0,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        # Mean of (1+2+3+4+5)/5 = 3.0.
+        self.assertEqual(first_closure[0].value, 3.0)
+        self.assertEqual(first_closure[0].event_count, 5)
+
+    def test_rejects_non_numeric_contribution(self):
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=MeanAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+        with self.assertRaises(TypeError):
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution="not-numeric",
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+
+    def test_real_zero_mean_distinguishable_from_empty_window(self):
+        # The headline test for option D: a window with contributions
+        # that happen to average to zero produces value=0.0 AND
+        # event_count > 0. Downstream consumers checking event_count
+        # can distinguish this from an empty window (which would be
+        # value=0.0 AND event_count=0). Without this distinction,
+        # AnomalyDetector instances watching means would false-positive
+        # on empty quiet periods.
+        agg = WindowAggregator(
+            spec=WindowSpec(size_seconds=5, slide_seconds=5),
+            aggregation=MeanAggregation(),
+            lateness_tolerance_seconds=60,
+        )
+        # Three contributions that sum to zero: 5.0, -3.0, -2.0.
+        for value in (5.0, -3.0, -2.0):
+            agg.observe(
+                partition_key="store-1",
+                event_timestamp=epoch_aligned(102),
+                contribution=value,
+                classification=EventClassification.ON_TIME,
+                watermark=epoch_aligned(102),
+            )
+        emissions = agg.observe(
+            partition_key="store-1",
+            event_timestamp=epoch_aligned(110),
+            contribution=0.0,
+            classification=EventClassification.ON_TIME,
+            watermark=epoch_aligned(110),
+        )
+        first_closure = [e for e in emissions if e.window_start == epoch_aligned(100)]
+        self.assertEqual(len(first_closure), 1)
+        # Mean = 0.0 / 3 = 0.0. event_count = 3 (not zero!).
+        self.assertEqual(first_closure[0].value, 0.0)
+        self.assertEqual(first_closure[0].event_count, 3)
 
 
 # ---------------------------------------------------------------------------
