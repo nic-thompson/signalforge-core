@@ -36,6 +36,10 @@ class FakeEvent:
     Minimal stand-in for ``event_schema_contracts.base.BaseEvent``.
 
     Satisfies ``signal_forge.streaming.event_protocol.TelemetryEvent``.
+
+    ``source`` defaults to ``"test-source"`` but is overridable for
+    tests that need to partition events by source via the pipeline's
+    default ``by_event_source`` extractor.
     """
 
     event_type: str
@@ -47,6 +51,7 @@ class FakeEvent:
         default_factory=lambda: datetime.now(UTC)
     )
     trace: FakeTrace = field(default_factory=FakeTrace)
+    source: str = "test-source"
     metadata: FakeMetadata = field(init=False)
 
     def __post_init__(self) -> None:
@@ -57,6 +62,7 @@ class FakeEvent:
             FakeMetadata(
                 schema_version=self.schema_version,
                 event_type=self.event_type,
+                source=self.source,
             ),
         )
 
