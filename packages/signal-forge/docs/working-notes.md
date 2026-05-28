@@ -213,6 +213,38 @@ Discriminator pattern: single schema, `detection_type: str` + `details: dict[str
 
 **Alternative considered:** Track *all* contributing trace_ids on the window state. Rejected because memory cost (a list per window) and we never lookup by trace anyway — the most-recent-contributor is the right narrowing.
 
+#### D-10: Callable injection is the right pattern for cross-phase deferrals, but the production data path must be sketched first
+
+When a future-phase component (e.g. `DeviceRegistry`) isn't ready yet, the current phase's consumers (e.g. `OfflineDetector`, `OutageDetector`) take a constructor `Callable[..., ...]` for the missing capability. Tests fill the callable with a hand-built dict or lambda; production wiring happens in the later phase. This is what we did in Phase 2 with `store_lookup` and `registered_count_lookup`, deferring `DeviceRegistry` to Phase 3.
+
+**Why:** Callable injection decouples phases. The consumer's interface is fixed by the abstract shape (e.g. `Callable[[UUID], str | None]`), not by the concrete implementation that comes later. Detectors stay testable in isolation and the later phase can build the real implementation without rewriting the consumer.
+
+**The hidden cost we encountered:** Test fakes can fill interfaces that production data cannot. Phase 2's tests built `store_lookup` from `{"store-1": 50}` dicts; we never asked "where does this dict come from in production?". When Phase 3 began designing `DeviceRegistry`, we discovered `DeviceRegistrationPayload` didn't carry `store_id` at all — the production projection wasn't expressible from the upstream event stream as it stood. The cost was small (upstream PR, SHA bump) because it surfaced before any further work depended on it. Caught later — after Phase 5 alert routing and Phase 6 dashboards had been built — it would have meant rewriting the registration mechanism, re-running every producer, and re-validating downstream consumers.
+
+**The lesson:** Before accepting a callable-injection deferral, do a 5-minute "design the production path enough to confirm it's possible" check. Specifically: trace the data the callable would need in production back to its source. If that source doesn't exist (the field isn't on the upstream schema, the event type isn't defined, the projection isn't deterministically computable), fix the gap *before* shipping the consumer — even though the consumer can technically be shipped with the test fake intact.
+
+**Trade-off considered:** Refusing all deferrals — every phase ships the production implementations end-to-end. Rejected because it serialises work that can run in parallel and forces upstream contract evolution earlier than necessary. The callable-injection pattern remains correct; only the discipline around accepting it changes.
+
+**Alternative considered:** Documenting the deferred-design risk in working-notes at the time of deferral, so the future phase's first task is to verify the production path. Equivalent in effect to the lesson above but more administrative. Either form works; what matters is that the verification happens before the deferred work is committed against.
+
+This entry exists because the Phase 3 / `DeviceRegistry` design caught the gap at a non-catastrophic moment. The pattern of "callable injection without production-path verification" is the kind of disciplined-looking-but-actually-risky default that's worth flagging in the decision log so future phases don't repeat it.
+
+#### D-11: Upstream contract evolution during a consumer phase is normal for the first deep integration
+
+Phase 3 produced two upstream PRs against `event-schema-contracts`: PR #2 (v0.3.0) adding required `store_id` to `DeviceRegistrationPayload`, and PR #3 (v0.4.0) adding `WindowedFeatureVectorPayload` as a sibling of the existing entity-centric variant. Neither was in the original Phase 3 plan; both were the right call at the moment they surfaced.
+
+**Why:** Phases 1 and 2 used the upstream contracts shallowly — read events, emit detections — and the contracts' existing shape was sufficient. Phase 3 is the first phase to *integrate* the upstream contracts with consumer logic at depth: a live device-to-store projection requires `store_id` on the registration payload; bundled feature emissions require a partition-window-centric payload variant. Surfacing two contract gaps during this phase isn't a failure of the upstream design — it's the predictable result of being the first deep consumer.
+
+**The pattern to recognise:** When a consumer phase's design conversation produces "the upstream doesn't quite fit our use case here", the right move is usually an upstream PR rather than a local workaround. Workarounds (shoehorning into an existing schema, defining a parallel local type, building UUIDv5-from-string hacks) compound: each one obscures the contract for future readers and complicates future evolution. Contract evolution upstream is contained, reviewed, and visible.
+
+**The cost is real but bounded.** Each Phase 3 upstream PR cost roughly an extra session — design, implementation, CI, PR, merge, tag, consumer SHA-bump. Phase 3 grew from a planned 7 commits to 9 to accommodate the two SHA bumps. Worth the cost: the consumer code stays clean and the contract carries the right semantics.
+
+**Trade-off considered:** Defer contract evolution to a dedicated "schema evolution" phase. Rejected because it serialises work that can run in parallel (the consumer can't ship cleanly without the contract change, so blocking on it doesn't save time), and because the contract evolution is best designed by the consumer who has the use case in hand.
+
+**The discipline to carry forward:** Future deep-integration phases (Phase 4 dataset layer, Phase 5 alert routing) should budget for *at least one* upstream PR. If a phase ships without any upstream evolution, that's either a sign the contracts are mature for that integration depth (good) or a sign that local workarounds slipped in (bad — review the consumer changes for shoehorning before declaring victory).
+
+This entry exists because the pattern is now a Phase-N constant, not a Phase-3 anomaly. New phases should plan for it, not be surprised by it.
+
 ## Known issues
 
 Things we know about and have decided how to handle.

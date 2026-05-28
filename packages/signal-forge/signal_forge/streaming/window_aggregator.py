@@ -18,8 +18,9 @@ Design properties
   the first event seen. This guarantees replay determinism and cross-
   shard window alignment for downstream joins.
 - **Pluggable aggregations**: an ``Aggregation`` is an init/combine pair.
-  Phase 1 ships ``CountAggregation`` and ``SumAggregation``; later
-  phases add distinct-count, mean, and quantile aggregations without
+  Phase 1 ships ``CountAggregation`` and ``SumAggregation``; Phase 2
+  added ``DistinctCountAggregation``; Phase 3 adds ``MeanAggregation``.
+  Further aggregations (quantiles, etc.) can be added without
   modifying the aggregator core.
 - **Late-event window repair**: a ``LATE_TOLERATED`` event whose
   timestamp falls inside a still-retained window updates that window's
@@ -122,8 +123,7 @@ class Aggregation(Protocol, Generic[StateT, ResultT]):
 
     ``finalise`` converts internal state into the externally-emitted
     value. For ``count`` and ``sum`` the state and result are the same;
-    for future aggregations like ``mean`` they will differ
-    (state = (sum, n), result = sum / n).
+    for ``mean`` they differ (state = (sum, n), result = sum / n).
     """
 
     name: str
@@ -208,6 +208,45 @@ class DistinctCountAggregation:
 
     def finalise(self, state: set[Hashable]) -> int:
         return len(state)
+
+
+@dataclasses.dataclass(frozen=True)
+class MeanAggregation:
+    """
+    Computes the windowed mean of numeric contributions: sum / count.
+
+    State is a (total, count) tuple. ``finalise`` returns 0.0 for an
+    empty window — by convention, ``WindowEmission.event_count``
+    carries the empty-window discriminator. Downstream consumers
+    that need to distinguish "the mean was zero" from "no
+    contributions" check ``event_count > 0`` before trusting the
+    value. This mirrors how statistical tools handle empty samples:
+    the result is technically undefined, but the sample size carries
+    the signal.
+
+    Non-numeric contributions raise ``TypeError``, matching
+    ``SumAggregation``'s precedent.
+    """
+
+    name: str = "mean"
+
+    def initial(self) -> tuple[float, int]:
+        return (0.0, 0)
+
+    def combine(
+        self, state: tuple[float, int], contribution: Any
+    ) -> tuple[float, int]:
+        if not isinstance(contribution, (int, float)):
+            raise TypeError(
+                f"MeanAggregation contribution must be numeric, "
+                f"got {type(contribution).__name__}"
+            )
+        total, count = state
+        return (total + float(contribution), count + 1)
+
+    def finalise(self, state: tuple[float, int]) -> float:
+        total, count = state
+        return total / count if count > 0 else 0.0
 
 
 # ---------------------------------------------------------------------------

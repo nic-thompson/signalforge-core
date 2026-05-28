@@ -20,6 +20,11 @@ Verifies the EventDetector contract for offline detection:
 - A device that flaps (seen -> offline -> seen -> offline) emits a
   fresh detection on each new offline transition. Pins the
   'once per offline transition event' semantics from D-7.
+
+The detector's store_lookup callable is wired to a real
+DeviceRegistry populated from registration events, replacing the
+hand-built dict that Phase 2's tests used. Behaviour is unchanged;
+the wiring is what's being verified.
 """
 
 from __future__ import annotations
@@ -29,9 +34,11 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from signal_forge.detection.detectors import OfflineDetector
+from signal_forge.detection.device_registry import DeviceRegistry
 from signal_forge.streaming.event_protocol import TelemetryEvent
 from tests._fixtures.events import FakeEvent
 from tests._fixtures.payloads import FakeDevicePayload
+from tests._fixtures.registration import make_registration_event
 
 
 def _event_at(seconds: int, *, device_id: UUID | None = None) -> TelemetryEvent:
@@ -57,11 +64,23 @@ class OfflineDetectorTest(unittest.TestCase):
         # Threshold 300s matches PlatformSettings's production default.
         self.device_a = uuid4()
         self.device_b = uuid4()
-        self.stores = {self.device_a: "store-1", self.device_b: "store-2"}
+
+        # Build a real DeviceRegistry populated via registration events.
+        # Phase 2's tests used a hand-built dict; the registry's
+        # store_for query is interface-compatible with the previous
+        # lambda-over-dict pattern.
+        self.registry = DeviceRegistry()
+        self.registry.observe_registration(
+            make_registration_event(device_id=self.device_a, store_id="store-1")
+        )
+        self.registry.observe_registration(
+            make_registration_event(device_id=self.device_b, store_id="store-2")
+        )
+
         self.detector = OfflineDetector(
             threshold_seconds=300,
             device_id_extractor=_extract,
-            store_lookup=lambda d: self.stores.get(d),
+            store_lookup=self.registry.store_for,
         )
 
     def test_first_event_registers_device_as_seen_no_emission(self):
@@ -101,7 +120,7 @@ class OfflineDetectorTest(unittest.TestCase):
         self.assertEqual(detections, [])
 
     def test_unregistered_device_does_not_emit(self):
-        # Device U is not in self.stores; store_lookup returns None.
+        # Device U is not in the registry; store_for returns None.
         # Even after crossing the threshold, no detection emits (the
         # schema requires non-empty store_id).
         device_u = uuid4()

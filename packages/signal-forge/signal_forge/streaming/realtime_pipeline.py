@@ -46,11 +46,20 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Iterable
+from datetime import datetime
 from typing import Final
+from uuid import UUID
 
+from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import DetectionEvent
+from event_schema_contracts.features.windowed_feature_vector import (
+    FeatureValue,
+    WindowedFeatureVectorEvent,
+    WindowedFeatureVectorPayload,
+)
 
 from signal_forge.detection.protocols import EmissionDetector, EventDetector
+from signal_forge.features import FEATURE_SCHEMA_VERSION
 from signal_forge.streaming.event_protocol import TelemetryEvent
 from signal_forge.streaming.event_router import EventRouter
 from signal_forge.streaming.observability import StructuredLoggerLike, get_logger
@@ -100,6 +109,14 @@ class ProcessingResult:
     within that emission). Replay determinism is preserved provided
     every detector itself observes the determinism contract documented
     in ``signal_forge.detection.protocols``.
+
+    The ``features`` list collects bundled feature emissions: one
+    ``WindowedFeatureVectorEvent`` per ``(partition_key, window_start)``
+    group from this call's emissions. A window with multiple aggregations
+    registered against it produces a single feature event carrying all
+    values in its ``feature_values`` dict. Repair emissions
+    (``is_repair=True``) produce additional feature events for the same
+    group — downstream consumers see updated values via a second event.
     """
 
     event_id: str
@@ -110,6 +127,94 @@ class ProcessingResult:
     emissions: list[WindowEmission]
     detections: list[DetectionEvent]
     extraction_failed: bool
+    features: list[WindowedFeatureVectorEvent]
+
+def _bundle_feature_events(
+    emissions: list[WindowEmission],
+) -> list[WindowedFeatureVectorEvent]:
+    """
+    Group emissions by ``(partition_key, window_start)`` and construct
+    one ``WindowedFeatureVectorEvent`` per group.
+
+    Each event's ``feature_values`` map carries the
+    ``{aggregation_name: value}`` pairs from emissions in that group.
+    A single window with multiple aggregations registered (e.g.
+    distinct-device-count plus mean-latency) bundles into one event
+    with both values rather than emitting separately — downstream
+    consumers see a coherent feature snapshot per partition-window.
+
+    Repair emissions (``is_repair=True``) are bundled alongside
+    first-closure emissions for the same ``(partition_key,
+    window_start)`` if both happen to be present in a single call's
+    emissions list. The typical case is that a single call produces
+    either first-closures or repairs for a given window, not both;
+    when both appear, the bundled event carries all their values in
+    the dict (last-write-wins on duplicate aggregation_names, which
+    is sound because a repair re-emits the same aggregation with
+    updated state).
+
+    Ordering: groups emit in the order their FIRST emission appears
+    in the input list. Within a group, ``feature_values`` is
+    assembled via dict construction; iteration order is insertion
+    order (Python 3.7+ guarantee). Replay-deterministic provided
+    the input emission ordering is.
+
+    Trace propagation is best-effort: if any emission in the group
+    has a non-``None`` ``last_contributing_trace_id``, the feature
+    event inherits the FIRST such trace. Otherwise a fresh
+    ``TraceContext`` is constructed. This matches the lineage-
+    propagation pattern used by emission detectors for
+    ``DetectionEvent``s in Phase 2.
+
+    ``event_id`` is left to ``BaseEvent``'s default (``uuid4()``).
+    Per-event identity is non-deterministic across replays; sequence-
+    level determinism (same input -> same number of events in the
+    same order with the same payloads) is preserved. This mirrors
+    the trade-off accepted for ``DetectionEvent``.
+    """
+    if not emissions:
+        return []
+
+    # Group by (partition_key, window_start), preserving first-seen order.
+    groups: dict[tuple[str, datetime], list[WindowEmission]] = {}
+    for emission in emissions:
+        key = (emission.partition_key, emission.window_start)
+        groups.setdefault(key, []).append(emission)
+
+    events: list[WindowedFeatureVectorEvent] = []
+    for (partition_key, window_start), group in groups.items():
+        first = group[0]
+        feature_values: dict[str, FeatureValue] = {
+            emission.aggregation_name: emission.value for emission in group
+        }
+        trace_id_str = next(
+            (
+                emission.last_contributing_trace_id
+                for emission in group
+                if emission.last_contributing_trace_id is not None
+            ),
+            None,
+        )
+        trace = (
+            TraceContext(trace_id=UUID(trace_id_str))
+            if trace_id_str is not None
+            else TraceContext()
+        )
+        payload = WindowedFeatureVectorPayload(
+            partition_key=partition_key,
+            window_start=window_start,
+            window_end=first.window_end,
+            feature_values=feature_values,
+            feature_version=FEATURE_SCHEMA_VERSION,
+        )
+        events.append(
+            WindowedFeatureVectorEvent(
+                event_timestamp=first.window_end,
+                trace=trace,
+                payload=payload,
+            )
+        )
+    return events
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +412,7 @@ class RealtimePipeline:
                 emissions=[],
                 detections=[],
                 extraction_failed=True,
+                features=[],
             )
 
         # ── 2. Watermark observation ───────────────────────────────────
@@ -427,6 +533,7 @@ class RealtimePipeline:
             emissions=all_emissions,
             detections=all_detections,
             extraction_failed=False,
+            features=_bundle_feature_events(all_emissions),
         )
 
     def process_batch(
