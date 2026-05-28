@@ -137,3 +137,70 @@ Total estimated growth: 144 → ~180. Slightly lower than the roadmap's ~190; we
 - `docs/roadmap.md` — Phase 4 (datasets) is the immediate downstream consumer of feature emissions; Phase 5 (alert routing) consumes detections that DeviceRegistry indirectly supports.
 - `event-schema-contracts` PR #2 (merged 2026-05-16) — the contract correction adding required `store_id` to `DeviceRegistrationPayload`.
 - Commit `e26eb16` — the SHA bump that made the new field available in this repo.
+
+## What Phase 3 delivered
+
+> Closing update appended after Phase 3 merged. The sections above record the plan as written at phase start; this section records what was actually built. Discrepancies between the two are honest signals about how Phase 3 unfolded vs how it was scoped.
+
+Nine commits landed on `feat/phase-3-feature-pipelines` (two more than the original seven-commit plan, owing to a second upstream PR):
+
+docs(status): add 2026-05-27 phase-3-complete snapshot
+chore(project): close Phase 3 housekeeping
+docs(features): add feature-pipelines reference document
+feat(features): bundle aggregation emissions into WindowedFeatureVectorEvents
+chore(deps): bump event-schema-contracts to 456269b
+feat(streaming): add MeanAggregation
+refactor(detection): wire OfflineDetector and OutageDetector tests to DeviceRegistry
+feat(detection): add DeviceRegistry component
+docs(project): add Phase 3 plan and D-10 working note
+chore(deps): bump event-schema-contracts to 5fc7980
+
+### Three components shipped as planned
+
+- **`DeviceRegistry`** (`signal_forge/detection/device_registry.py`) — router-subscribed projection of `device.registration` events into a live device→store mapping. Dual-state internal representation for O(1) bidirectional queries. Wired into `OfflineDetector` and `OutageDetector` tests as the canonical store/device-count source, replacing the Phase 2 callable-over-dict pattern.
+
+- **`MeanAggregation`** (`signal_forge/streaming/window_aggregator.py`) — fourth aggregation alongside `CountAggregation`, `SumAggregation`, `DistinctCountAggregation`. State is `(total, count)` tuple. Empty-window result is `0.0`; the discriminator is `WindowEmission.event_count`, not a sentinel value (option D from the design conversation).
+
+- **Feature emissions** — but not via the originally-planned `FeatureSink` protocol. After design conversation, settled on the function-shaped pattern: features flow back as a list on `ProcessingResult.features`, consistent with how detections work (D-5). No sink protocol. Bundled per `(partition_key, window_start)` via `_bundle_feature_events` inside `process()`.
+
+### Upstream contract evolution — the unplanned-but-correct work
+
+The second upstream PR (event-schema-contracts v0.4.0) introduced `WindowedFeatureVectorPayload` as a sibling of the existing entity-centric `FeatureVectorPayload`. Discovered during feature-emission design when the existing payload turned out to require `entity_id: UUID` and `source_event_id: UUID`, neither of which fits a windowed aggregation over many source events with a string-typed partition key.
+
+Captured as decision D-11 in `docs/working-notes.md`: upstream contract evolution during a consumer phase is normal for the first deep integration, not an emergency.
+
+### Estimate vs actual
+
+Original estimate: 10-14 hours of focused work. Actual: ~14-16 hours across multiple sessions, plus the two upstream PRs (~4 hours combined). The breakdown roughly:
+
+- DeviceRegistry design + implementation + tests: ~3 hours.
+- Detector test refactor to use the registry: ~1 hour.
+- MeanAggregation design + implementation + tests: ~1.5 hours.
+- Feature-emission design conversation (4 questions): ~1 hour.
+- Upstream PR for `WindowedFeatureVectorPayload` (design, code, tests, PR, CI, merge, tag): ~2 hours.
+- Consumer SHA bump + feature-bundling implementation + tests: ~3 hours.
+- Reference doc (`docs/feature-pipelines.md`): ~1 hour.
+- Closing housekeeping + status snapshot: ~1 hour.
+
+The overrun is consistent with the roadmap's "Underestimating Phase 4" risk being a real concern: Phase 3 was a first-deep-integration phase that pushed the upstream contracts twice. The pattern will likely persist into Phase 4 (S3 mock infrastructure) and Phase 5 (alert routing's replay-aware sink discipline).
+
+### Test count delta
+
+| Phase | Tests | Delta |
+|---|---|---|
+| Phase 2 close | 144 | — |
+| DeviceRegistry | 154 | +10 |
+| Detector test refactor | 154 | 0 (net) |
+| MeanAggregation | 159 | +5 |
+| Feature bundling | 166 | +7 |
+| **Phase 3 close** | **166** | **+22** |
+
+15% test growth in one phase, healthy for the volume of new logic shipped.
+
+### Lessons worth carrying forward
+
+- **Always confirm watermark semantics before writing integration tests.** The feature-bundling tests initially used `event_timestamp=110` to close a window at `event_timestamp=105`. With `lateness_tolerance_seconds=60`, the watermark sits 60s behind the highest event_timestamp; closing the window required `event_timestamp >= 165`. Cost: one diagnostic round-trip. Lesson: paste the watermark contract before writing tests against it, same discipline as "paste type definitions before writing code against them".
+
+- **`Aggregation.name` is the dict key, not `register_aggregator(name)`.** Caught during multi-aggregation bundling test. Documented in `docs/feature-pipelines.md`.
+
+- **The "two upstream PRs in one phase" pattern is now expected.** See D-11.

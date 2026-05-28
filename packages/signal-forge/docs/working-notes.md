@@ -229,6 +229,21 @@ When a future-phase component (e.g. `DeviceRegistry`) isn't ready yet, the curre
 
 This entry exists because the Phase 3 / `DeviceRegistry` design caught the gap at a non-catastrophic moment. The pattern of "callable injection without production-path verification" is the kind of disciplined-looking-but-actually-risky default that's worth flagging in the decision log so future phases don't repeat it.
 
+#### D-11: Upstream contract evolution during a consumer phase is normal for the first deep integration
+
+Phase 3 produced two upstream PRs against `event-schema-contracts`: PR #2 (v0.3.0) adding required `store_id` to `DeviceRegistrationPayload`, and PR #3 (v0.4.0) adding `WindowedFeatureVectorPayload` as a sibling of the existing entity-centric variant. Neither was in the original Phase 3 plan; both were the right call at the moment they surfaced.
+
+**Why:** Phases 1 and 2 used the upstream contracts shallowly — read events, emit detections — and the contracts' existing shape was sufficient. Phase 3 is the first phase to *integrate* the upstream contracts with consumer logic at depth: a live device-to-store projection requires `store_id` on the registration payload; bundled feature emissions require a partition-window-centric payload variant. Surfacing two contract gaps during this phase isn't a failure of the upstream design — it's the predictable result of being the first deep consumer.
+
+**The pattern to recognise:** When a consumer phase's design conversation produces "the upstream doesn't quite fit our use case here", the right move is usually an upstream PR rather than a local workaround. Workarounds (shoehorning into an existing schema, defining a parallel local type, building UUIDv5-from-string hacks) compound: each one obscures the contract for future readers and complicates future evolution. Contract evolution upstream is contained, reviewed, and visible.
+
+**The cost is real but bounded.** Each Phase 3 upstream PR cost roughly an extra session — design, implementation, CI, PR, merge, tag, consumer SHA-bump. Phase 3 grew from a planned 7 commits to 9 to accommodate the two SHA bumps. Worth the cost: the consumer code stays clean and the contract carries the right semantics.
+
+**Trade-off considered:** Defer contract evolution to a dedicated "schema evolution" phase. Rejected because it serialises work that can run in parallel (the consumer can't ship cleanly without the contract change, so blocking on it doesn't save time), and because the contract evolution is best designed by the consumer who has the use case in hand.
+
+**The discipline to carry forward:** Future deep-integration phases (Phase 4 dataset layer, Phase 5 alert routing) should budget for *at least one* upstream PR. If a phase ships without any upstream evolution, that's either a sign the contracts are mature for that integration depth (good) or a sign that local workarounds slipped in (bad — review the consumer changes for shoehorning before declaring victory).
+
+This entry exists because the pattern is now a Phase-N constant, not a Phase-3 anomaly. New phases should plan for it, not be surprised by it.
 
 ## Known issues
 
