@@ -144,7 +144,7 @@ The 13-commit count is above the roadmap's 10–14 estimate's midpoint but withi
 
 Phase 4 is done when:
 
-- A `signal_forge/dataset/` package exists containing `PartitionKey`, partition helpers, `InMemoryDatasetWriter`, `S3DatasetWriter`, and a Parquet serialisation module.
+- A `signal_forge/datasets/` package exists containing `PartitionKey`, partition helpers, `InMemoryDatasetWriter`, `S3DatasetWriter`, and a Parquet serialisation module.
 - `PlatformSettings` exposes `dataset_bucket` and `replay_dataset_bucket` fields; `for_replay()` swaps the active bucket.
 - `RealtimePipeline` accepts a dataset writer and hands `ProcessingResult` to it on every `process()` call.
 - A replay-isolation integration test runs the same event sequence through live and replay-tagged pipelines, asserting byte-identical Parquet contents written to different buckets.
