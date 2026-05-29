@@ -47,6 +47,14 @@ class PlatformSettingsDefaultsTest(unittest.TestCase):
         self.assertEqual(settings.data_retention_days, DEFAULT_DATA_RETENTION_DAYS)
         self.assertEqual(settings.data_retention_days, 730)
 
+    def test_dataset_bucket_defaults_to_none(self) -> None:
+        settings = PlatformSettings()
+        self.assertIsNone(settings.dataset_bucket)
+
+    def test_replay_dataset_bucket_defaults_to_none(self) -> None:
+        settings = PlatformSettings()
+        self.assertIsNone(settings.replay_dataset_bucket)
+
 
 class PlatformSettingsValidationTest(unittest.TestCase):
     def test_rejects_zero_realtime_window(self):
@@ -80,6 +88,41 @@ class PlatformSettingsValidationTest(unittest.TestCase):
     def test_rejects_negative_lateness(self):
         with self.assertRaises(ValueError):
             PlatformSettings(late_event_tolerance_seconds=-1)
+
+class PlatformSettingsDatasetBucketValidationTest(unittest.TestCase):
+    """
+    Validation of the dataset_bucket and replay_dataset_bucket fields
+    against the loose AWS S3 bucket-naming rules.
+    """
+
+    def test_accepts_valid_bucket_name(self) -> None:
+        settings = PlatformSettings(dataset_bucket="signal-forge-prod")
+        self.assertEqual(settings.dataset_bucket, "signal-forge-prod")
+
+    def test_rejects_uppercase_in_bucket_name(self) -> None:
+        with self.assertRaises(ValueError):
+            PlatformSettings(dataset_bucket="Signal-Forge-Prod")
+
+    def test_rejects_bucket_name_starting_with_hyphen(self) -> None:
+        with self.assertRaises(ValueError):
+            PlatformSettings(dataset_bucket="-signal-forge")
+
+    def test_rejects_bucket_name_ending_with_hyphen(self) -> None:
+        with self.assertRaises(ValueError):
+            PlatformSettings(dataset_bucket="signal-forge-")
+
+    def test_rejects_bucket_name_too_short(self) -> None:
+        with self.assertRaises(ValueError):
+            PlatformSettings(dataset_bucket="sf")
+
+    def test_rejects_bucket_name_too_long(self) -> None:
+        with self.assertRaises(ValueError):
+            # 64 chars, one over the limit
+            PlatformSettings(dataset_bucket="a" * 64)
+
+    def test_validates_replay_dataset_bucket_too(self) -> None:
+        with self.assertRaises(ValueError):
+            PlatformSettings(replay_dataset_bucket="INVALID")
 
 
 class PlatformSettingsImmutabilityTest(unittest.TestCase):
@@ -122,6 +165,23 @@ class PlatformSettingsFromEnvTest(unittest.TestCase):
         self.assertEqual(settings.data_retention_days, 365)
         self.assertEqual(settings.environment, "staging")
 
+    def test_from_env_loads_dataset_buckets(self) -> None:
+        settings = PlatformSettings.from_env(
+            env={
+                "SF_DATASET_BUCKET": "signal-forge-prod",
+                "SF_REPLAY_DATASET_BUCKET": "signal-forge-replay",
+            }
+        )
+        self.assertEqual(settings.dataset_bucket, "signal-forge-prod")
+        self.assertEqual(settings.replay_dataset_bucket, "signal-forge-replay")
+
+    def test_from_env_treats_empty_bucket_as_none(self) -> None:
+        settings = PlatformSettings.from_env(
+            env={"SF_DATASET_BUCKET": "", "SF_REPLAY_DATASET_BUCKET": ""}
+        )
+        self.assertIsNone(settings.dataset_bucket)
+        self.assertIsNone(settings.replay_dataset_bucket)
+
     def test_from_env_parses_float_overrides(self):
         settings = PlatformSettings.from_env(
             env={"SF_OUTAGE_THRESHOLD_RATIO": "0.75"}
@@ -154,6 +214,19 @@ class PlatformSettingsReplayTest(unittest.TestCase):
         original = PlatformSettings()
         replayed = original.for_replay(replay_environment="replay-2026-04-30")
         self.assertEqual(replayed.environment, "replay-2026-04-30")
+
+    def test_for_replay_swaps_dataset_bucket(self) -> None:
+        live = PlatformSettings(
+            dataset_bucket="signal-forge-prod",
+            replay_dataset_bucket="signal-forge-replay",
+        )
+        replay = live.for_replay()
+        self.assertEqual(replay.dataset_bucket, "signal-forge-replay")
+
+    def test_for_replay_swaps_to_none_when_no_replay_bucket(self) -> None:
+        live = PlatformSettings(dataset_bucket="signal-forge-prod")
+        replay = live.for_replay()
+        self.assertIsNone(replay.dataset_bucket)
 
 
 if __name__ == "__main__":

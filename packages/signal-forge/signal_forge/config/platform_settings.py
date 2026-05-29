@@ -20,6 +20,7 @@ as the system grows.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field, replace
 from typing import Final
 
@@ -43,6 +44,42 @@ DEFAULT_OFFLINE_THRESHOLD_SECONDS: Final[int] = 300       # 5 minutes
 DEFAULT_OUTAGE_THRESHOLD_RATIO: Final[float] = 0.5         # 50% of devices offline
 DEFAULT_LATE_EVENT_TOLERANCE_SECONDS: Final[int] = 60
 DEFAULT_DATA_RETENTION_DAYS: Final[int] = 730              # 2 years
+
+# ---------------------------------------------------------------------------
+# AWS S3 bucket naming rules
+# ---------------------------------------------------------------------------
+#
+# Loose validation — catches obvious typos and misconfiguration at startup
+# so a six-hour replay doesn't fail at the first create_bucket call. AWS S3's
+# full naming spec is stricter (no consecutive periods, no IP-address-style
+# names, no `xn--` prefix); we trust AWS to reject anything that sneaks past
+# us at actual create_bucket time.
+
+_BUCKET_NAME_MIN_LENGTH: Final[int] = 3
+_BUCKET_NAME_MAX_LENGTH: Final[int] = 63
+_BUCKET_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"
+)
+
+
+def _validate_bucket_name(name: str, field_name: str) -> None:
+    """
+    Validate an S3 bucket name against loose naming rules.
+
+    Catches obvious typos and misconfiguration at startup. ``field_name``
+    is interpolated into error messages so the same helper can validate
+    both the live and replay bucket fields with clear attribution.
+    """
+    if len(name) < _BUCKET_NAME_MIN_LENGTH or len(name) > _BUCKET_NAME_MAX_LENGTH:
+        raise ValueError(
+            f"{field_name} must be {_BUCKET_NAME_MIN_LENGTH}-"
+            f"{_BUCKET_NAME_MAX_LENGTH} chars, got {len(name)}: {name!r}"
+        )
+    if not _BUCKET_NAME_PATTERN.match(name):
+        raise ValueError(
+            f"{field_name} must be lowercase alphanumeric or hyphens, "
+            f"not starting or ending with hyphen: {name!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +123,14 @@ class PlatformSettings:
     service_name: str = "signal-forge"
     environment: str = field(default_factory=lambda: os.environ.get("SF_ENV", "dev"))
 
+    # S3 bucket for live dataset writes (Phase 4). None means "no dataset
+    # export configured" — the writer no-ops rather than failing.
+    dataset_bucket: str | None = None
+
+    # S3 bucket for replay-isolated dataset writes. for_replay() swaps the
+    # active bucket; the writer reads dataset_bucket and is replay-oblivious.
+    replay_dataset_bucket: str | None = None
+
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
@@ -113,6 +158,11 @@ class PlatformSettings:
 
         if not self.environment:
             raise ValueError("environment must be non-empty")
+
+        if self.dataset_bucket is not None:
+            _validate_bucket_name(self.dataset_bucket, "dataset_bucket")
+        if self.replay_dataset_bucket is not None:
+            _validate_bucket_name(self.replay_dataset_bucket, "replay_dataset_bucket")
 
     # ------------------------------------------------------------------
     # Factories
@@ -149,6 +199,8 @@ class PlatformSettings:
             ),
             service_name=source.get("SF_SERVICE_NAME", "signal-forge"),
             environment=source.get("SF_ENV", "dev"),
+            dataset_bucket=source.get("SF_DATASET_BUCKET") or None,
+            replay_dataset_bucket=source.get("SF_REPLAY_DATASET_BUCKET") or None,
         )
 
     def for_replay(self, replay_environment: str = "replay") -> PlatformSettings:
@@ -157,10 +209,18 @@ class PlatformSettings:
 
         Replay should run with identical analytical parameters but a distinct
         environment label so log streams / metrics do not collide with the
-        live pipeline.
+        live pipeline. The dataset bucket also swaps to the replay-isolated
+        bucket — unconditionally, even when ``replay_dataset_bucket`` is
+        ``None``. A missing replay bucket surfaces as a no-op writer rather
+        than silently writing to the live bucket, which is the safer
+        failure mode.
         """
 
-        return replace(self, environment=replay_environment)
+        return replace(
+            self,
+            environment=replay_environment,
+            dataset_bucket=self.replay_dataset_bucket,
+        )
 
 
 # ---------------------------------------------------------------------------
