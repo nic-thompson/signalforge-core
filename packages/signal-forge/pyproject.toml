@@ -83,3 +83,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# pyarrow ships a partial py.typed stub set; several parquet entry points
+# (e.g. write_table) are seen as untyped, which trips strict mode's
+# disallow_untyped_calls at our call sites. Treat pyarrow as untyped.
+# First needed in Phase 4 commit 6, the first source module to import it.
+module = "pyarrow.*"
+follow_imports = "skip"
