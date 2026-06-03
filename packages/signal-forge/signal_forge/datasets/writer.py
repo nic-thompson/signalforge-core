@@ -23,6 +23,7 @@ the flush sequence is byte-identical across runs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -103,65 +104,62 @@ class _PartitionBuffer:
     features: list[WindowedFeatureVectorEvent] = field(default_factory=list)
 
 
-class InMemoryDatasetWriter:
+def _is_nonempty(buf: _PartitionBuffer) -> bool:
+    return bool(buf.emissions or buf.detections or buf.features)
+
+
+class _PartitionBufferSet:
     """
-    Buffers records per PartitionKey, flushes on window-close emissions.
+    Per-partition record buffering with window-close-triggered flushing.
 
-    Each ProcessingResult is processed in three phases:
+    Owns the buffer dict and the three-phase absorb logic that turns a
+    stream of ProcessingResults into FlushedPartitions. On each flush it
+    invokes ``on_flush(FlushedPartition)``; the caller decides what that
+    means — InMemoryDatasetWriter accumulates the flush in a list, the
+    S3 writer (commit 8) serialises and uploads it. The flush state
+    machine lives here exactly once so every writer shares one correct
+    copy:
 
-    1. Append detections and features to their partition buffers.
-    2. Append emissions to their partition buffers.
-    3. For each PartitionKey with any new emissions, emit a
-       FlushedPartition containing the entire buffered contents, then
-       clear the partition's buffer.
+    - detections and features buffer without triggering a flush,
+    - each emission buffers and flags its partition for flush,
+    - flagged partitions flush in first-seen (insertion) order,
+    - a flush emits the partition's entire buffered contents, then clears
+      it, so a repair emission arriving in a later result flushes again
+      as a fresh FlushedPartition for the same PartitionKey.
 
-    Flushed partitions accumulate in an internal list, accessible via
-    `flushed_records()` for test inspection. Repair emissions
-    (`is_repair=True`) trigger separate flushes for their partition,
-    producing multiple FlushedPartition entries with the same
-    PartitionKey.
-
-    Flush order within a single write() call is the iteration order of
-    `result.emissions` — whichever partition's emission appears first
-    is flushed first. Subsequent emissions for the same partition in
-    the same result merge into one flush.
+    Replay determinism: no clock, no cross-call state beyond the buffer
+    dict. Given the same ProcessingResult sequence, the on_flush call
+    sequence is identical across runs.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, on_flush: Callable[[FlushedPartition], None]) -> None:
+        self._on_flush = on_flush
         self._buffers: dict[PartitionKey, _PartitionBuffer] = {}
-        self._flushed: list[FlushedPartition] = []
 
-    def write(self, result: ProcessingResult) -> None:
+    def absorb(self, result: ProcessingResult) -> None:
         # Phase 1: buffer detections and features by their derived
         # PartitionKey. These don't trigger flushes themselves.
         for det in result.detections:
-            key = partition_key_from_detection(det)
-            self._buffer_for(key).detections.append(det)
+            self._buffer_for(partition_key_from_detection(det)).detections.append(det)
 
         for feat in result.features:
-            key = partition_key_from_feature(feat)
-            self._buffer_for(key).features.append(feat)
+            self._buffer_for(partition_key_from_feature(feat)).features.append(feat)
 
-        # Phase 2 + 3: for each emission, buffer it and flag its
-        # partition for flush. Use an insertion-ordered dict to track
-        # flush order — `dict` in Python 3.7+ preserves insertion order.
+        # Phase 2 + 3: for each emission, buffer it and flag its partition
+        # for flush. Insertion-ordered dict preserves first-seen flush
+        # order (dict is insertion-ordered in Python 3.7+).
         partitions_to_flush: dict[PartitionKey, None] = {}
         for emi in result.emissions:
             key = partition_key_from_emission(emi)
             self._buffer_for(key).emissions.append(emi)
             partitions_to_flush[key] = None
 
-        # Flush each flagged partition, in insertion order.
         for key in partitions_to_flush:
             self._flush_partition(key)
 
-    def flushed_records(self) -> list[FlushedPartition]:
-        """Return all FlushedPartitions, in flush order."""
-        return list(self._flushed)
-
     def buffered_partitions(self) -> set[PartitionKey]:
-        """Return PartitionKeys currently holding any buffered records."""
-        return {k for k, buf in self._buffers.items() if self._is_nonempty(buf)}
+        """PartitionKeys currently holding any buffered records."""
+        return {k for k, buf in self._buffers.items() if _is_nonempty(buf)}
 
     def _buffer_for(self, key: PartitionKey) -> _PartitionBuffer:
         if key not in self._buffers:
@@ -170,7 +168,7 @@ class InMemoryDatasetWriter:
 
     def _flush_partition(self, key: PartitionKey) -> None:
         buf = self._buffers[key]
-        self._flushed.append(
+        self._on_flush(
             FlushedPartition(
                 partition_key=key,
                 emissions=tuple(buf.emissions),
@@ -178,13 +176,37 @@ class InMemoryDatasetWriter:
                 features=tuple(buf.features),
             )
         )
-        # Clear the partition's buffer. Keep the buffer object so
-        # subsequent appends don't need to re-create it.
+        # Clear the partition's buffer but keep the object so subsequent
+        # appends don't need to re-create it.
         buf.emissions.clear()
         buf.detections.clear()
         buf.features.clear()
 
-    @staticmethod
-    def _is_nonempty(buf: _PartitionBuffer) -> bool:
-        return bool(buf.emissions or buf.detections or buf.features)
+
+class InMemoryDatasetWriter:
+    """
+    Buffers records per PartitionKey, flushes on window-close emissions,
+    and accumulates the flushes in memory for test inspection.
+
+    A thin composition over ``_PartitionBufferSet``: the buffering and
+    flush state machine lives there; this writer's only job is to collect
+    each flushed partition into a list reachable via ``flushed_records()``.
+    Repair emissions (``is_repair=True``) flush separately, producing
+    multiple FlushedPartition entries with the same PartitionKey.
+    """
+
+    def __init__(self) -> None:
+        self._flushed: list[FlushedPartition] = []
+        self._buffers = _PartitionBufferSet(on_flush=self._flushed.append)
+
+    def write(self, result: ProcessingResult) -> None:
+        self._buffers.absorb(result)
+
+    def flushed_records(self) -> list[FlushedPartition]:
+        """Return all FlushedPartitions, in flush order."""
+        return list(self._flushed)
+
+    def buffered_partitions(self) -> set[PartitionKey]:
+        """Return PartitionKeys currently holding any buffered records."""
+        return self._buffers.buffered_partitions()
 
