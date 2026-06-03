@@ -47,7 +47,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable, Iterable
 from datetime import datetime
-from typing import Final
+from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
 from event_schema_contracts.base.trace import TraceContext
@@ -72,6 +72,14 @@ from signal_forge.streaming.window_aggregator import (
     WindowEmission,
 )
 
+if TYPE_CHECKING:
+    # Imported under TYPE_CHECKING to avoid a circular import:
+    # signal_forge.datasets.writer imports ProcessingResult from this
+    # module. DatasetWriter is a Protocol, so nothing here needs the
+    # concrete class at runtime — the annotation is enough for mypy and
+    # `from __future__ import annotations` keeps it a string at runtime.
+    from signal_forge.datasets.writer import DatasetWriter
+
 # Type alias: a partition extractor takes an event and returns a string
 # key. Production extractors will read payload fields (store_id,
 # device_id, etc.); the pipeline does not assume a particular shape.
@@ -84,6 +92,7 @@ _LOG_EVENT_PROCESSED: Final[str] = "pipeline.processed"
 _LOG_EVENT_EXTRACTION_ERROR: Final[str] = "pipeline.extraction_error"
 _LOG_EVENT_AGGREGATION_ERROR: Final[str] = "pipeline.aggregation_error"
 _LOG_EVENT_DETECTOR_ERROR: Final[str] = "pipeline.detector_error"
+_LOG_EVENT_WRITER_ERROR: Final[str] = "pipeline.writer_error"
 _LOG_EVENT_BATCH_SUMMARY: Final[str] = "pipeline.batch_summary"
 
 
@@ -316,6 +325,14 @@ class RealtimePipeline:
         self._event_detectors: list[EventDetector] = []
         self._emission_detectors: dict[str, list[EmissionDetector]] = {}
 
+        # A single optional dataset writer. Structurally singular: the
+        # replay-isolation model swaps one active bucket via
+        # PlatformSettings.for_replay(), so "which of several writers is
+        # the replay-isolated one?" has no coherent answer. Registered
+        # post-construction like the other observers; see
+        # register_dataset_writer.
+        self._dataset_writer: DatasetWriter | None = None
+
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
@@ -363,6 +380,28 @@ class RealtimePipeline:
         """
         bucket = self._emission_detectors.setdefault(detector.aggregation_name, [])
         bucket.append(detector)
+
+    def register_dataset_writer(self, writer: DatasetWriter) -> None:
+        """
+        Register the dataset writer.
+
+        At most one writer per pipeline: a second registration raises,
+        the same fail-fast posture ``register_aggregator`` takes on a
+        duplicate name. The single-writer constraint is the honest shape
+        of the replay-isolation model — ``PlatformSettings.for_replay()``
+        swaps one active bucket, so a list of writers would have no
+        well-defined replay-isolated member.
+
+        The writer receives each successful ``ProcessingResult`` (see
+        ``process``). It is *not* called on the extraction-failure path,
+        whose result carries no emissions and would buffer nothing. A
+        writer that raises is logged and skipped (strict mode re-raises),
+        matching the per-observer failure isolation applied to
+        aggregators and detectors.
+        """
+        if self._dataset_writer is not None:
+            raise ValueError("dataset writer already registered")
+        self._dataset_writer = writer
 
     # ------------------------------------------------------------------
     # Processing
@@ -524,7 +563,7 @@ class RealtimePipeline:
                 "detections": len(all_detections),
             },
         )
-        return ProcessingResult(
+        result = ProcessingResult(
             event_id=event_id,
             partition_key=partition_key,
             classification=observation.classification,
@@ -535,6 +574,35 @@ class RealtimePipeline:
             extraction_failed=False,
             features=_bundle_feature_events(all_emissions),
         )
+
+        # ── 7. Dataset writer dispatch ─────────────────────────────────
+        # Hand the successful result to the registered dataset writer, if
+        # any. Bulkheaded like every other observer: a raising writer is
+        # logged with lineage and skipped so it cannot poison the batch;
+        # strict mode re-raises for replay-validation runs. Only the
+        # success path writes — the extraction-failure result carries no
+        # emissions and would buffer nothing.
+        if self._dataset_writer is not None:
+            try:
+                self._dataset_writer.write(result)
+            except Exception as exc:
+                self._logger.error(
+                    "Dataset writer raised during write()",
+                    event_type=_LOG_EVENT_WRITER_ERROR,
+                    trace_id=trace_id,
+                    metadata={
+                        "event_id": event_id,
+                        "partition_key": partition_key,
+                        "emissions": len(all_emissions),
+                        "detections": len(all_detections),
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                    },
+                )
+                if self._strict:
+                    raise
+
+        return result
 
     def process_batch(
         self,
