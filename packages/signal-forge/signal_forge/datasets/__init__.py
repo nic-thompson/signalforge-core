@@ -18,6 +18,7 @@ from signal_forge.datasets.partition import (
     partition_key_from_emission,
     partition_key_from_feature,
 )
+from signal_forge.datasets.s3_writer import S3DatasetWriter
 from signal_forge.datasets.writer import (
     DatasetWriter,
     FlushedPartition,
@@ -29,6 +30,7 @@ __all__ = [
     "FlushedPartition",
     "InMemoryDatasetWriter",
     "PartitionKey",
+    "S3DatasetWriter",
     "partition_key_from_detection",
     "partition_key_from_emission",
     "partition_key_from_feature",
