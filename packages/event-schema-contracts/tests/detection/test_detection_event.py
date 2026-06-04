@@ -8,7 +8,7 @@ detection_type and details.
 """
 
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_DNS, uuid1, uuid4, uuid5
 
 import pytest
 from pydantic import ValidationError
@@ -81,34 +81,55 @@ def test_schema_registered():
 # ---------------------------------------------------------------------------
 
 
-def test_detection_id_must_be_uuid_v4(utc_now):
-    with pytest.raises(ValidationError) as exc:
-        DetectionEventPayload(
-            detection_id=UUID(int=0),  # not v4
-            detection_type="device.offline",
-            severity=DetectionSeverity.WARNING,
-            detected_at=utc_now,
-            store_id="store-001",
-            source_event_id=uuid4(),
-            threshold_breached="some breach",
-            details={},
+def _payload_with(*, detection_id, source_event_id, utc_now):
+    return DetectionEventPayload(
+        detection_id=detection_id,
+        detection_type="device.offline",
+        severity=DetectionSeverity.WARNING,
+        detected_at=utc_now,
+        store_id="store-001",
+        source_event_id=source_event_id,
+        threshold_breached="some breach",
+        details={},
+    )
+
+
+def test_detection_id_accepts_v4_and_v5(utc_now):
+    # v4 (random) and v5 (deterministically derived) are both valid. v5
+    # lets a consumer regenerate detection ids reproducibly so they
+    # survive a replay byte-for-byte.
+    for detection_id in (
+        uuid4(),
+        uuid5(NAMESPACE_DNS, "detection.device_offline|store-001"),
+    ):
+        payload = _payload_with(
+            detection_id=detection_id, source_event_id=uuid4(), utc_now=utc_now
         )
+        assert payload.detection_id == detection_id
+
+
+def test_detection_id_rejects_non_v4_v5(utc_now):
+    # v1 encodes host/time; disallowed on these fields.
+    with pytest.raises(ValidationError) as exc:
+        _payload_with(detection_id=uuid1(), source_event_id=uuid4(), utc_now=utc_now)
 
     assert exc.value.errors()[0]["loc"] == ("detection_id",)
 
 
-def test_source_event_id_must_be_uuid_v4(utc_now):
-    with pytest.raises(ValidationError) as exc:
-        DetectionEventPayload(
-            detection_id=uuid4(),
-            detection_type="device.offline",
-            severity=DetectionSeverity.WARNING,
-            detected_at=utc_now,
-            store_id="store-001",
-            source_event_id=UUID(int=0),  # not v4
-            threshold_breached="some breach",
-            details={},
+def test_source_event_id_accepts_v4_and_v5(utc_now):
+    for source_event_id in (
+        uuid4(),
+        uuid5(NAMESPACE_DNS, "source.store_outage|store-001"),
+    ):
+        payload = _payload_with(
+            detection_id=uuid4(), source_event_id=source_event_id, utc_now=utc_now
         )
+        assert payload.source_event_id == source_event_id
+
+
+def test_source_event_id_rejects_non_v4_v5(utc_now):
+    with pytest.raises(ValidationError) as exc:
+        _payload_with(detection_id=uuid4(), source_event_id=uuid1(), utc_now=utc_now)
 
     assert exc.value.errors()[0]["loc"] == ("source_event_id",)
 

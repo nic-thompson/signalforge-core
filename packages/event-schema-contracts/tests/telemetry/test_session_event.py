@@ -3,7 +3,7 @@ from event_schema_contracts.telemetry.session_event import (
     SessionStartPayload
 ) 
 from datetime import datetime, timezone, timedelta
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
 
 from pydantic import ValidationError
 
@@ -40,6 +40,20 @@ def test_invalid_uuid_rejected():
     with pytest.raises(ValidationError) as exc:
         SessionStartPayload(
             session_id=UUID(int=0),
+            actor_id=uuid4(),
+            started_at=datetime.now(timezone.utc),
+        )
+
+    assert exc.value.errors()[0]["loc"] == ("session_id",)
+
+
+def test_session_id_rejects_uuid5():
+    # session_id is a strict __uuid_v4_fields__ entry. The detection
+    # payload's v4-or-v5 relaxation must not have leaked into the strict
+    # policy, so a derived (v5) id is still rejected here.
+    with pytest.raises(ValidationError) as exc:
+        SessionStartPayload(
+            session_id=uuid5(NAMESPACE_DNS, "not-allowed-here"),
             actor_id=uuid4(),
             started_at=datetime.now(timezone.utc),
         )

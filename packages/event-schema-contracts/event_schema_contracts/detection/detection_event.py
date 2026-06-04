@@ -69,7 +69,7 @@ class DetectionEventPayload(DomainEventPayload):
                  "threshold": 0.5, "direction": "below"}
     """
 
-    __uuid_v4_fields__: ClassVar[tuple[str, ...]] = (
+    __uuid_v4_or_v5_fields__: ClassVar[tuple[str, ...]] = (
         "detection_id",
         "source_event_id",
     )
