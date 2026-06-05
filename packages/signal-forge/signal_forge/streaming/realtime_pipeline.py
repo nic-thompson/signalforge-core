@@ -60,6 +60,7 @@ from event_schema_contracts.features.windowed_feature_vector import (
 
 from signal_forge.detection.protocols import EmissionDetector, EventDetector
 from signal_forge.features import FEATURE_SCHEMA_VERSION
+from signal_forge.identity import derive
 from signal_forge.streaming.event_protocol import TelemetryEvent
 from signal_forge.streaming.event_router import EventRouter
 from signal_forge.streaming.observability import StructuredLoggerLike, get_logger
@@ -218,6 +219,13 @@ def _bundle_feature_events(
         )
         events.append(
             WindowedFeatureVectorEvent(
+                event_id=derive(
+                    "event.feature",
+                    partition_key,
+                    window_start,
+                    first.window_end,
+                    FEATURE_SCHEMA_VERSION,
+                ),
                 event_timestamp=first.window_end,
                 trace=trace,
                 payload=payload,
