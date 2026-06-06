@@ -31,6 +31,7 @@ from event_schema_contracts.detection import (
 )
 
 from signal_forge.detection.types import DETECTION_TYPE_SIGNAL_ANOMALY
+from signal_forge.identity import derive
 from signal_forge.streaming.window_aggregator import WindowEmission
 
 # State machine: not_anomalous (implicit, partition_key not in dict)
@@ -110,14 +111,27 @@ class AnomalyDetector:
         emission: WindowEmission,
     ) -> DetectionEvent:
         direction_word = "above" if self.comparison == "above" else "below"
+        detection_id = derive(
+            "detection.signal_anomaly",
+            partition_key,
+            self.signal_name,
+            emission.window_start,
+            emission.window_end,
+        )
         payload = DetectionEventPayload(
-            detection_id=uuid4(),
+            detection_id=detection_id,
             detection_type=DETECTION_TYPE_SIGNAL_ANOMALY,
             severity=DetectionSeverity.WARNING,
             detected_at=emission.window_end,
             store_id=partition_key,
             device_id=None,
-            source_event_id=uuid4(),
+            source_event_id=derive(
+                "source.signal_anomaly",
+                partition_key,
+                self.signal_name,
+                emission.window_start,
+                emission.window_end,
+            ),
             threshold_breached=(
                 f"{self.signal_name} {value} {direction_word} "
                 f"threshold {self.threshold}"
@@ -137,6 +151,7 @@ class AnomalyDetector:
             else str(uuid4())
         )
         return DetectionEvent(
+            event_id=derive("event.detection", detection_id),
             event_timestamp=emission.window_end,
             trace=TraceContext(trace_id=trace_id),
             payload=payload,

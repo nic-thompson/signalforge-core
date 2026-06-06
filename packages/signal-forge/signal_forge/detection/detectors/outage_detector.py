@@ -35,6 +35,7 @@ from event_schema_contracts.detection import (
 )
 
 from signal_forge.detection.types import DETECTION_TYPE_STORE_OUTAGE
+from signal_forge.identity import derive
 from signal_forge.streaming.window_aggregator import WindowEmission
 
 # State machine: not_outage (implicit, store not in dict) -> outage.
@@ -134,14 +135,25 @@ class OutageDetector:
     ) -> DetectionEvent:
         offline_pct = round(offline_ratio * 100)
         threshold_pct = round(self.threshold_ratio * 100)
+        detection_id = derive(
+            "detection.store_outage",
+            store_id,
+            emission.window_start,
+            emission.window_end,
+        )
         payload = DetectionEventPayload(
-            detection_id=uuid4(),
+            detection_id=detection_id,
             detection_type=DETECTION_TYPE_STORE_OUTAGE,
             severity=DetectionSeverity.CRITICAL,
             detected_at=emission.window_end,
             store_id=store_id,
             device_id=None,
-            source_event_id=uuid4(),
+            source_event_id=derive(
+                "source.store_outage",
+                store_id,
+                emission.window_start,
+                emission.window_end,
+            ),
             threshold_breached=(
                 f"{offline_count} of {registered} devices not reporting "
                 f"({offline_pct}% offline, threshold {threshold_pct}%)"
@@ -161,6 +173,7 @@ class OutageDetector:
             else str(uuid4())
         )
         return DetectionEvent(
+            event_id=derive("event.detection", detection_id),
             event_timestamp=emission.window_end,
             trace=TraceContext(trace_id=trace_id),
             payload=payload,

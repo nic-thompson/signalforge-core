@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import ClassVar, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import (
@@ -29,6 +29,7 @@ from event_schema_contracts.detection import (
 )
 
 from signal_forge.detection.types import DETECTION_TYPE_DEVICE_OFFLINE
+from signal_forge.identity import derive
 from signal_forge.streaming.event_protocol import TelemetryEvent
 
 # State machine: unseen (implicit, not in the dict) -> seen -> offline.
@@ -130,8 +131,11 @@ class OfflineDetector:
         source_event: TelemetryEvent,
     ) -> DetectionEvent:
         silent_seconds = int(silent_for.total_seconds())
+        detection_id = derive(
+            "detection.device_offline", store_id, device_id, source_event.event_id
+        )
         payload = DetectionEventPayload(
-            detection_id=uuid4(),
+            detection_id=detection_id,
             detection_type=DETECTION_TYPE_DEVICE_OFFLINE,
             severity=DetectionSeverity.WARNING,
             detected_at=source_event.event_timestamp,
@@ -148,6 +152,7 @@ class OfflineDetector:
             },
         )
         return DetectionEvent(
+            event_id=derive("event.detection", detection_id),
             event_timestamp=source_event.event_timestamp,
             trace=TraceContext(trace_id=source_event.trace.trace_id),
             payload=payload,

@@ -103,6 +103,10 @@ These aren't optional. Twice in Phase 1 a commit nearly shipped with missing fil
 
 When writing tests that construct Phase 1 types (`WindowEmission`, `RealtimePipeline`, `ProcessingResult`, etc.), I (the AI) ask you to paste the type's current definition before I write the test. Memory-based test code shipped two bugs in Phase 2 (`FakeTrace` failing pydantic validation, `WindowEmission`'s `aggregator_name` vs `aggregation_name` field rename) that paste-then-write would have caught.
 
+### Diff a file against its current version before overwriting it from a snapshot
+
+When applying a whole-file change — especially one generated from an earlier snapshot of the repo — diff it against the working tree before overwriting. A later commit may have moved the file on: during Phase 4, `realtime_pipeline.py` was overwritten from a pre-commit-7 snapshot and silently lost `register_dataset_writer` and its dispatch, which only the dataset-writer tests caught. The three detectors were safe only because nothing had touched them since Phase 2. The rule: for any file a later commit might have changed, prefer a targeted edit to the current file over wholesale replacement; and if replacing, `git diff` before staging so a reverted addition shows up immediately.
+
 ### Conversational hygiene with `gh` and `git`
 
 Both tools default to using a pager (`less`). Empty terminal output after a `gh` or `git` command's first hypothesis should be "the pager opened and I closed it". Either disable globally:
@@ -244,6 +248,34 @@ Phase 3 produced two upstream PRs against `event-schema-contracts`: PR #2 (v0.3.
 **The discipline to carry forward:** Future deep-integration phases (Phase 4 dataset layer, Phase 5 alert routing) should budget for *at least one* upstream PR. If a phase ships without any upstream evolution, that's either a sign the contracts are mature for that integration depth (good) or a sign that local workarounds slipped in (bad — review the consumer changes for shoehorning before declaring victory).
 
 This entry exists because the pattern is now a Phase-N constant, not a Phase-3 anomaly. New phases should plan for it, not be surprised by it.
+
+#### D-12: `PlatformSettings` is the canonical home for live-vs-replay switches — names and labels, not connection objects
+
+Phase 4's dataset layer needed a way to route writes to a live S3 bucket in production and to a sealed replay bucket during replay runs. The decision was to add two `str | None` fields to `PlatformSettings` — `dataset_bucket` and `replay_dataset_bucket` — and have `for_replay()` swap the active bucket on the returned copy. The writer reads `settings.dataset_bucket` and does not care whether it's running live or replay.
+
+**Why:** `for_replay()` already exists *specifically* to centralise the live-vs-replay distinction. Its Phase 1 job was rebranding the `environment` label so log streams don't collide; its Phase 4 job is swapping the active dataset bucket. The shape of the change is the same in both phases, in the same place, for the same reason. Adding a parallel live-vs-replay switching mechanism elsewhere would create exactly the "easy to forget flag that causes incidents" hazard D-5 was written to avoid — except symmetrically, applied to the writer side rather than the detector side.
+
+**The boundary that matters:** `PlatformSettings` carries the bucket *name* (a `str`), not a boto3 client, not credentials, not a region resolver. The discipline established in the existing module docstring — "stdlib-only — importable from any context without pydantic/AWS deps" — survives the addition. The boto3 client gets constructed by the writer from the bucket name; that's where AWS dependencies are allowed to live. Anything richer than a name or a label is the wrong shape for `PlatformSettings` and belongs in the consuming component.
+
+**Trade-off considered:** Per-writer config passed at construction (`DatasetWriter(bucket=..., replay_bucket=...)`). Rejected because it creates a second live-vs-replay switching mechanism in parallel to `for_replay()`. A future engineer wiring up a replay driver would have to remember to flip both — the settings *and* the writer config. One source of truth is cheaper than two.
+
+**Alternative considered:** A separate `DatasetSettings` object alongside `PlatformSettings`. Rejected because the existing `data_retention_days` field already crosses the dataset-layer boundary (its docstring explicitly says "consumed in Phase 4"). Splitting would scatter dataset-layer config across two homes for no clear benefit, and the same argument would recur for every future phase — `AlertSettings`, `DashboardSettings`, `ReplaySettings` — none of which carries enough weight to justify its own object.
+
+**The discipline to carry forward:** Phase 5 alert routing will face the same question (EventBridge bus name, SNS topic ARN, replay-isolated alert sink). Phase 6 dashboard projections will face it again (DynamoDB table name, replay-isolated table). The default answer for each is: name fields on `PlatformSettings`, swap on `for_replay()`, construct the AWS client in the consuming component. Departures from this default need explicit justification, not just "feels cleaner to keep it local".
+
+This entry exists because the right place to put a live-vs-replay switch is non-obvious — local config feels lighter at the moment of writing, but the cost of getting it wrong (a replay run accidentally writing to the live bucket, or alerting the live on-call) is high enough that the convention deserves to be a documented default rather than a per-phase rediscovery.
+
+#### D-13: A contract change is "local" only if the validators — not just the field types — permit the value you intend to produce
+
+Commit 9's replay byte-identity assertion required `detection_id`, `source_event_id`, and the envelope `event_id` to be deterministic across runs. Deriving them via UUIDv5 from stable coordinates looked like a purely local `signal-forge` change: the upstream fields are typed `UUID`, and a UUIDv5 *is* a `UUID`. It was not local. `event_schema_contracts`'s `UUIDv4Model` enforces UUIDv4 on those fields through a `field_validator` keyed off `__uuid_v4_fields__`, so a derived v5 id was rejected at construction. The change required relaxing the upstream contract (PR #4, `event-schema-contracts` v0.5.0, adding a `__uuid_v4_or_v5_fields__` policy) plus a consumer SHA bump — two commits and an upstream PR — before the consumer change could land.
+
+**Why the misjudgement happened:** reading the field *annotation* (`UUID`) and concluding "any UUID is accepted". The annotation describes the type; the *validator* describes the accepted values, and the two diverge precisely at the kind of constraint — version, range, format, `extra="forbid"` — that makes a change non-local.
+
+**The discipline:** before judging a contract change local, read the upstream model's validators and config — `field_validator`s, `model_config` (`extra=`, `frozen=`), and any custom base class (here `UUIDv4Model`) — not just the field annotations. Then construct the value you intend to produce against the *real* contract early: a five-line "does this even validate?" check is cheaper than discovering mid-implementation that the consumer change can't land without an upstream PR and SHA-bump cycle you have already built on top of.
+
+**Relationship to D-10 and D-11:** the same family of lesson. D-10 says trace a deferred callable's production data path before accepting the deferral; D-11 says budget for at least one upstream PR per deep-integration phase; D-13 says verify the upstream *constraint*, not just its type signature, before deciding where a change lives. All three are "confirm the real constraint before committing to an approach", surfaced at three different boundaries.
+
+This entry exists because "it's just a UUID" is exactly the kind of type-level reasoning that feels safe and skips the validator — and the cost of the wrong call is a mid-flight pivot from "local edit" to "upstream PR, release, re-pin", far more expensive caught late than the five-minute check that prevents it.
 
 ## Known issues
 
