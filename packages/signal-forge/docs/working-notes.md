@@ -277,6 +277,22 @@ Commit 9's replay byte-identity assertion required `detection_id`, `source_event
 
 This entry exists because "it's just a UUID" is exactly the kind of type-level reasoning that feels safe and skips the validator — and the cost of the wrong call is a mid-flight pivot from "local edit" to "upstream PR, release, re-pin", far more expensive caught late than the five-minute check that prevents it.
 
+#### D-14: Acknowledgement state is a replay-deterministic event projection; reminder cadence is wall-clock and lives outside the deterministic path
+
+Phase 5 alert routing needs to know whether an alert has been acknowledged (to decide how to route it) and needs to remind on-call about still-unacked alerts on some cadence. Both look like "alerting state", but they sit on opposite sides of the determinism boundary, and the decision is to split them there rather than treat them as one feature.
+
+**Acknowledgement state rides the event stream.** An `alert.acknowledgement v1` event type flows through the same stream as telemetry and device-registration events. An `AcknowledgementRegistry` subscribes to `("alert.acknowledgement", "v1")` via the `EventRouter` — the exact mechanism `DeviceRegistry` uses (settled in the Phase 3 plan) — and projects acks into live state. Because acks are events in the ordered stream, ack state is a deterministic function of input order: a replay reconstructs byte-identical ack state, and every determinism contract in `replay-workflows.md` holds. D-5's "same input sequence produces the same detection sequence" extends cleanly to "the same input sequence produces the same ack-resolved routing decisions".
+
+**Reminder cadence is wall-clock and is *not* in the pipeline.** "Re-page about this still-unacked alert every N minutes" fires on elapsed real time, not on event arrival. It cannot be replay-deterministic, and a timer inside `RealtimePipeline` would reintroduce both the daemon shape (D-4) and the `datetime.now()` the spine forbids everywhere. So cadence lives in an operational scheduler explicitly outside the deterministic path: it consumes routed alerts and current ack state and fires reminders on its own clock. Phase 5 *names and bounds* this seam in `docs/alert-routing.md` but does not build the loop; the scheduler is a follow-up. A replay run, routing to a sealed sink, never exercises cadence — there is nothing to re-page.
+
+**The boundary that matters:** the same conceptual feature ("alerting lifecycle") straddles the determinism line, and the split is *which state is reconstructable from the event stream*. Ack state is, because acks are events; cadence state is not, because elapsed wall-clock time is not an event. The discipline is to push everything that *can* be an event projection onto the deterministic side, and fence the irreducibly-wall-clock remainder into a clearly-labelled operational component — rather than letting the wall-clock part contaminate the pipeline because it happened to be bundled with the deterministic part in the brief.
+
+**Trade-off considered:** an operational store (DynamoDB) holding *both* ack and cadence state, outside the replay path entirely. Rejected for ack state because it would forfeit replay determinism of routing decisions for no reason — acks *can* be events, so making them events is strictly better. Accepted for cadence, which has no event-shaped form. The split is the point: same store would have been simpler to write and wrong about half of what it held.
+
+**Relationship to D-4, D-5, D-12:** D-4 keeps the pipeline function-shaped (no event loop); D-5 makes detections a return value so replays reproduce them; D-12 keeps the live-vs-replay switch in one place. D-14 is those three applied to alerting: the deterministic part (routing, ack projection) stays in the function-shaped pipeline and reproduces under replay; the non-deterministic part (cadence) is fenced out, and the replay isolation that protects it is the same `for_replay()` sink swap D-12 established.
+
+This entry exists because "finish the alerting layer" naturally tempts a future phase to add a reminder timer to the pipeline — and that single, reasonable-looking addition would be the first wall-clock dependency in the deterministic core. The boundary is worth recording as a decision so it is defended deliberately, not rediscovered after a replay run starts behaving non-reproducibly.
+
 ## Known issues
 
 Things we know about and have decided how to handle.
