@@ -178,6 +178,14 @@ Total estimated growth: 166 → ~220. Comfortably within the roadmap's range.
 
 ## What Phase 4 delivered
 
-> Closing update appended after Phase 4 merged. The sections above record the plan as written at phase start; this section records what was actually built. Discrepancies between the two are honest signals about how Phase 4 unfolded vs how it was scoped.
+> Closing reconciliation written at commit 12 (housekeeping), before the PR merges — the same as-if-merged framing the Phase 2 and Phase 3 snapshots used. The sections above are the plan as written at phase start; this records what was actually built. The discrepancies are honest signals about how Phase 4 unfolded.
 
-(To be filled in after merge.)
+The dataset layer landed as planned through commit 8, including the predicted commit-8 split into a `_PartitionBufferSet` extraction (8a) and the S3 writer (8b). Beyond that, Phase 4 diverged from the 13-commit plan in two honest ways.
+
+**Two unplanned commits and an upstream PR, between commits 8 and 9.** Commit 9's replay byte-identity assertion required the detection and feature identity fields (`detection_id`, `source_event_id`, envelope `event_id`) to be deterministic across runs. They were `uuid4`. Making them deterministic — UUIDv5 derivation from stable coordinates, in `signal_forge/identity.py` — required relaxing the upstream `UUIDv4Model` contract, whose validator forbade v5. So an upstream PR landed first (`event-schema-contracts` v0.5.0, the `__uuid_v4_or_v5_fields__` policy), then a consumer SHA bump (`chore(deps): bump event-schema-contracts to 5f11c0f`), then the derivation (`feat(detection): derive replay-deterministic identity via UUIDv5`), and only then commit 9. This is the D-11 pattern — budget for at least one upstream PR per deep-integration phase — recurring exactly as predicted, and it produced decision D-13.
+
+**Commits 9 and 10 are tests, not features.** The plan tagged them `feat(dataset): replay isolation` and `feat(dataset): schema evolution`, but the feature code (writers, serialiser, settings) all landed in commits 3–8b. What 9 and 10 add is the *verification* of properties those features deliver, so they landed as `test(datasets): replay byte-identity across live and replay buckets` and `test(datasets): schema-per-file round-trips across contract versions`.
+
+**Test count:** 166 → 247 (the plan estimated ~220). The extra growth is mostly the identity-derivation test module (`tests/test_identity.py`, 11 tests) the original plan didn't foresee, since deterministic identity wasn't a planned deliverable until commit 9 forced it.
+
+Actual `signal-forge` commit sequence for Phase 4 (oldest first): Parquet serialisation; pipeline writer integration; `_PartitionBufferSet` extraction; `S3DatasetWriter`; `chore(deps)` SHA bump to v0.5.0; UUIDv5 identity derivation; replay byte-identity test; schema-per-file test; dataset-export reference doc; this housekeeping commit; status snapshot — plus upstream `event-schema-contracts` PR #4 (v0.5.0).
