@@ -93,7 +93,7 @@ jobs:
         # telemetry-parser. pip resolves these directly from GitHub.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev, datasets]"
 
       - name: Verify upstream contracts import cleanly
         # Sanity check: confirm the production import paths the streaming
