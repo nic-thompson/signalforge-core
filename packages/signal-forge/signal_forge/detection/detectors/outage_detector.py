@@ -10,11 +10,14 @@ DetectionEvent when the ratio crosses threshold_ratio. State machine
 mirrors OfflineDetector's: transition into outage emits, transition
 back to not-outage resets silently.
 
-Replay-deterministic in the sense that matters: same input emission
-sequence produces same output detection sequence (modulo the
-non-deterministic detection_id and source_event_id, which are uuid4()
-for now and can be made deterministic in Phase 7 if byte-identical
-replay outputs become a requirement).
+Replay-deterministic: same input emission sequence produces the same
+output detection sequence, including detection_id and source_event_id.
+Those identity fields are derived via signal_forge.identity.derive
+(UUIDv5 over stable coordinates — store_id and window bounds), not
+minted as uuid4, so two runs over the same emissions produce
+byte-identical identities. (They were uuid4-based through Phases 2-3
+and made deterministic when the Phase 4 dataset layer's replay
+byte-identity test required it.)
 
 Design notes captured in docs/working-notes.md under D-7 (state
 machine semantics) and D-8 (DetectionEvent schema).
