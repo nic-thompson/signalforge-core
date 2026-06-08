@@ -73,14 +73,18 @@ Follows D-12 exactly, the same shape Phase 4 used for `dataset_bucket`/`replay_d
 
 **3. Validation at construction.** ARN/name shape validated in `__post_init__` the same way the bucket fields validate against AWS S3 naming rules — fail fast at startup, not three hours into a replay.
 
-## Acknowledgement gating vs annotation — question to settle
+## Acknowledgement gating vs annotation — settled design
 
 Does the router *gate* on ack state (suppress routing of an already-acked detection's alert) or *annotate* (always route, stamp `acknowledged: true/false` and let the downstream scheduler suppress)?
 
 - **Gating** is more useful at the router but couples the router to ack state and raises an out-of-order question: an ack arriving before the alert it acknowledges has been routed.
 - **Annotation** keeps the router a pure function of `(detection, ack_state)` with no suppression logic, pushing the suppress-or-not decision to the cadence scheduler — which is already the home of wall-clock suppression under D-14.
 
-Leaning annotation, because it keeps the deterministic router pure and concentrates suppression in the (non-deterministic, operational) scheduler where reminder logic already lives. To be settled before the `AlertRouter` commit. Estimated 15 minutes of design.
+**Decision: annotate.** The `AlertRouter` always produces an `AlertEvent` per detection, stamped with acknowledgement status, and never suppresses. Suppression — declining to re-page about an already-acknowledged alert — lives in the downstream cadence scheduler, the wall-clock component D-14 already fences outside the deterministic path.
+
+This keeps the router a pure function of `(detection, ack_state)`: same inputs, same `AlertEvent`, every time, which is the determinism property the phase rests on. It also dissolves the out-of-order problem rather than fighting it — an ack arriving before its alert is routed needs no special handling, because the router simply stamps current ack state at routing time and a later change is the scheduler's concern, not a routing-correctness one. And it loses no information: the annotation carries the full ack signal downstream, where the cadence, rotation, and time-of-day context needed to act on it actually live.
+
+Mechanism: the acknowledgement status is carried in the `AlertEventPayload.details` dict (e.g. `details={"acknowledged": false, ...}`), not as a dedicated payload field. The `alert.event v1` contract is already fixed and has no acknowledgement field; `details` is the opaque, forward-compatible pass-through for exactly this kind of consumer-facing annotation, consistent with how the detection contract uses its own `details`. No schema change is needed.
 
 ## Alert-key payload field — question to settle
 
