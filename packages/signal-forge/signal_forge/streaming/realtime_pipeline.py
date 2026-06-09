@@ -50,6 +50,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
+from event_schema_contracts.alerts.alert_event import AlertEvent
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import DetectionEvent
 from event_schema_contracts.features.windowed_feature_vector import (
@@ -58,6 +59,7 @@ from event_schema_contracts.features.windowed_feature_vector import (
     WindowedFeatureVectorPayload,
 )
 
+from signal_forge.alerts.alert_router import AlertRouter
 from signal_forge.detection.protocols import EmissionDetector, EventDetector
 from signal_forge.features import FEATURE_SCHEMA_VERSION
 from signal_forge.identity import derive
@@ -93,6 +95,7 @@ _LOG_EVENT_PROCESSED: Final[str] = "pipeline.processed"
 _LOG_EVENT_EXTRACTION_ERROR: Final[str] = "pipeline.extraction_error"
 _LOG_EVENT_AGGREGATION_ERROR: Final[str] = "pipeline.aggregation_error"
 _LOG_EVENT_DETECTOR_ERROR: Final[str] = "pipeline.detector_error"
+_LOG_EVENT_ALERT_ROUTER_ERROR = "alerts.router_error"
 _LOG_EVENT_WRITER_ERROR: Final[str] = "pipeline.writer_error"
 _LOG_EVENT_BATCH_SUMMARY: Final[str] = "pipeline.batch_summary"
 
@@ -136,6 +139,7 @@ class ProcessingResult:
     handler_failures: int
     emissions: list[WindowEmission]
     detections: list[DetectionEvent]
+    alerts: list[AlertEvent]
     extraction_failed: bool
     features: list[WindowedFeatureVectorEvent]
 
@@ -340,6 +344,7 @@ class RealtimePipeline:
         # post-construction like the other observers; see
         # register_dataset_writer.
         self._dataset_writer: DatasetWriter | None = None
+        self._alert_router: AlertRouter | None = None
 
     # ------------------------------------------------------------------
     # Registration
@@ -411,6 +416,20 @@ class RealtimePipeline:
             raise ValueError("dataset writer already registered")
         self._dataset_writer = writer
 
+    def register_alert_router(self, router: AlertRouter) -> None:
+        """
+        Register the alert router.
+
+        At most one router per pipeline: a second registration raises,
+        the same fail-fast posture as register_dataset_writer. The router
+        consumes each successful result's detections and produces alerts
+        onto ProcessingResult.alerts. It is not run on the extraction-
+        failure path, which carries no detections.
+        """
+        if self._alert_router is not None:
+            raise ValueError("alert router already registered")
+        self._alert_router = router
+
     # ------------------------------------------------------------------
     # Processing
     # ------------------------------------------------------------------
@@ -458,6 +477,7 @@ class RealtimePipeline:
                 handler_failures=0,
                 emissions=[],
                 detections=[],
+                alerts=[],
                 extraction_failed=True,
                 features=[],
             )
@@ -571,6 +591,23 @@ class RealtimePipeline:
                 "detections": len(all_detections),
             },
         )
+        all_alerts: list[AlertEvent] = []
+        if self._alert_router is not None:
+            try:
+                all_alerts = self._alert_router.route(all_detections)
+            except Exception as exc:
+                self._logger.error(
+                    "Alert router raised during route()",
+                    event_type=_LOG_EVENT_ALERT_ROUTER_ERROR,
+                    trace_id=trace_id,
+                    metadata={
+                        "event_id": event_id,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                    },
+                )
+                if self._strict:
+                    raise
         result = ProcessingResult(
             event_id=event_id,
             partition_key=partition_key,
@@ -579,6 +616,7 @@ class RealtimePipeline:
             handler_failures=dispatch_result.handler_failures,
             emissions=all_emissions,
             detections=all_detections,
+            alerts=all_alerts,
             extraction_failed=False,
             features=_bundle_feature_events(all_emissions),
         )
