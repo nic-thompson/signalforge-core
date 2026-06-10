@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from event_schema_contracts.alerts.alert_event import AlertEvent
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import (
     DetectionEvent,
@@ -118,6 +119,7 @@ def result(
     emissions: list[WindowEmission] | None = None,
     detections: list[DetectionEvent] | None = None,
     features: list[WindowedFeatureVectorEvent] | None = None,
+    alerts: list[AlertEvent] | None = None,
     event_id: str = "test-event",
 ) -> ProcessingResult:
     """Construct a ProcessingResult holding the three record lists."""
@@ -131,4 +133,5 @@ def result(
         detections=detections or [],
         extraction_failed=False,
         features=features or [],
+        alerts=alerts or [],
     )
