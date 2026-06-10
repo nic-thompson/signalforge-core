@@ -81,6 +81,27 @@ def _validate_bucket_name(name: str, field_name: str) -> None:
             f"not starting or ending with hyphen: {name!r}"
         )
 
+_BUS_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
+_BUS_NAME_MAX_LENGTH: Final[int] = 256
+
+
+def _validate_bus_name(name: str, field_name: str) -> None:
+    """
+    Validate an EventBridge event-bus name against loose naming rules.
+
+    Catches obvious typos at startup. AWS's full spec is stricter; we
+    trust AWS to reject anything that sneaks past at put_events time.
+    """
+    if len(name) < 1 or len(name) > _BUS_NAME_MAX_LENGTH:
+        raise ValueError(
+            f"{field_name} must be 1-{_BUS_NAME_MAX_LENGTH} chars, "
+            f"got {len(name)}: {name!r}"
+        )
+    if not _BUS_NAME_PATTERN.match(name):
+        raise ValueError(
+            f"{field_name} must be alphanumeric, dot, hyphen or "
+            f"underscore: {name!r}"
+        )
 
 # ---------------------------------------------------------------------------
 # Settings object
@@ -131,6 +152,17 @@ class PlatformSettings:
     # active bucket; the writer reads dataset_bucket and is replay-oblivious.
     replay_dataset_bucket: str | None = None
 
+    # EventBridge bus for live alert publication (Phase 5). None means
+    # "no alert routing configured" — the alert sink no-ops rather than
+    # failing. The router still produces alerts on ProcessingResult.alerts;
+    # only their publication to the bus is gated on this being set.
+    alert_bus: str | None = None
+
+    # EventBridge bus for replay-isolated alert publication. for_replay()
+    # swaps the active bus; a missing replay bus no-ops rather than
+    # publishing replay alerts to the live bus (the safer failure mode).
+    replay_alert_bus: str | None = None
+
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
@@ -163,6 +195,11 @@ class PlatformSettings:
             _validate_bucket_name(self.dataset_bucket, "dataset_bucket")
         if self.replay_dataset_bucket is not None:
             _validate_bucket_name(self.replay_dataset_bucket, "replay_dataset_bucket")
+
+        if self.alert_bus is not None:
+            _validate_bus_name(self.alert_bus, "alert_bus")
+        if self.replay_alert_bus is not None:
+            _validate_bus_name(self.replay_alert_bus, "replay_alert_bus")
 
     # ------------------------------------------------------------------
     # Factories
@@ -201,6 +238,8 @@ class PlatformSettings:
             environment=source.get("SF_ENV", "dev"),
             dataset_bucket=source.get("SF_DATASET_BUCKET") or None,
             replay_dataset_bucket=source.get("SF_REPLAY_DATASET_BUCKET") or None,
+            alert_bus=source.get("SF_ALERT_BUS") or None,
+            replay_alert_bus=source.get("SF_REPLAY_ALERT_BUS") or None,
         )
 
     def for_replay(self, replay_environment: str = "replay") -> PlatformSettings:
@@ -214,12 +253,17 @@ class PlatformSettings:
         ``None``. A missing replay bucket surfaces as a no-op writer rather
         than silently writing to the live bucket, which is the safer
         failure mode.
+
+        The alert bus swaps the same way, for the same reason: a replay
+        run publishes to the replay bus, or to nothing if no replay bus
+        is configured, never to the live bus.
         """
 
         return replace(
             self,
             environment=replay_environment,
             dataset_bucket=self.replay_dataset_bucket,
+            alert_bus=self.replay_alert_bus,
         )
 
 
