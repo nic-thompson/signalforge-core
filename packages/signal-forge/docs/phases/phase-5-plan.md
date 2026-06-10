@@ -166,6 +166,22 @@ Total estimated growth: 247 → ~285. Consistent with the roadmap's per-phase sh
 
 ## What Phase 5 delivered
 
-> Closing reconciliation appended after Phase 5 merges, matching the as-if-merged framing of the Phase 2–4 snapshots. The sections above are the plan as written at phase start; this records what was actually built.
+The phase landed close to plan, with the design questions resolved as the plan anticipated. Nine commits past the store-outage documentation work on `main`:
 
-(To be filled in at housekeeping, before the PR merges.)
+- `docs(project): add Phase 5 plan and D-14 working note`
+- `chore(deps): bump event-schema-contracts to 0c3b48b`
+- `docs(project): settle Phase 5 ack gating-vs-annotation as annotate`
+- `feat(alerts): add AcknowledgementRegistry and AlertRouter`
+- `feat(alerts): integrate AlertRouter into RealtimePipeline`
+- `feat(alerts): add alert-bus config and the AlertSink boundary`
+- `feat(alerts): add EventBridgeAlertSink via moto`
+- `test(alerts): replay byte-identity of routing decisions`
+- `docs(alerts): add alert-routing reference document`
+
+Plus the upstream `event-schema-contracts` v0.6.0 PR (`alert.event v1` and `alert.acknowledgement v1`), the D-11 upstream contribution this phase budgeted for.
+
+**How the design questions resolved.** All three open questions settled as the plan leaned. Acknowledgement gating-vs-annotation went to **annotate** (a pure router; suppression deferred to the cadence scheduler), recorded as the settled-design section and D-14. The alert-key payload shape was fixed by the upstream schema (`alert_id` a first-class UUIDv4-or-v5 field), closing that question at contract-design time. Severity-to-sink topology resolved against the real `aws-event-pipeline-infra`: it provisions one environment-scoped EventBridge bus with detail-type routing rules, so severity rides on `DetailType` and routing is an infra-side rule concern — simpler than the plan's three candidate options.
+
+**Caller-wired publication.** The plan left open whether the sink is pipeline-registered or caller-wired; it settled on **caller-wired** (the pipeline returns `ProcessingResult.alerts`; the caller picks the sink), because publication is an environment-dependent side effect and the live-vs-replay sink choice belongs where the environment context lives — consistent with how the feature and detection layers stay pure returns.
+
+**Test count:** 247 → 295. The growth is the router and registry units, the pipeline-integration tests, the config and sink tests, the moto-backed EventBridge tests, and the replay byte-identity proof.

@@ -305,6 +305,8 @@ Things we know about and have decided how to handle.
 
 - **`event-schema-contracts` top-level `__init__.py` doesn't eagerly import domains.** Consumers must import each domain explicitly (`event_schema_contracts.detection.X`) for schemas to register on the registry. Convention works; ergonomic wart. Possible future tidying.
 
+- **CI runner Node 20 deprecation.** GitHub Actions emits a deprecation warning that `actions/checkout@v4` and `actions/setup-python@v5` run on Node 20, which will be forced to Node 24 from 2026-06-16 and removed from runners 2026-09-16. CI is green and unaffected for now; the fix (bump the action versions) is a small CI PR, due before the September removal.
+
 ### Deferred
 
 - **`DeviceRegistry` component** for `OutageDetector`'s registered-device-count lookup. Phase 2 takes a constructor callable; Phase 3 or 4 introduces a real registry component when feature pipelines also need it.
