@@ -293,11 +293,68 @@ Phase 5 alert routing needs to know whether an alert has been acknowledged (to d
 
 This entry exists because "finish the alerting layer" naturally tempts a future phase to add a reminder timer to the pipeline — and that single, reasonable-looking addition would be the first wall-clock dependency in the deterministic core. The boundary is worth recording as a decision so it is defended deliberately, not rediscovered after a replay run starts behaving non-reproducibly.
 
+### D-15 — Dashboard projections update per-emission, inside the deterministic path
+
+Dashboard projections (Phase 6) update on every relevant event, not on a
+wall-clock timer or per-window batch. A per-emission fold over the ordered
+event stream is replay-deterministic — it reconstructs the same view on
+replay, the property DeviceRegistry and AcknowledgementRegistry already
+have — whereas wall-clock-batched flushing would not be.
+
+This is the mirror of D-14. There, reminder cadence was fenced *out* of the
+deterministic path because it is inherently wall-clock. Here, projection
+updates are kept *in* the deterministic path because they can be: they are
+a function of the events, not of elapsed time. Same boundary, opposite side.
+
+The cost is write amplification — every event touches the projection store —
+which is DDIA's central materialised-view trade-off (write cost vs read
+freshness). For this platform's scale and the sub-5-second dashboard
+requirement, always-fresh is the right call; the cost is named, not hidden.
+
+### D-16 — OfflineDetector emits a device.online recovery event, revisiting D-7
+
+D-7 established "once per offline transition; recovery clears state silently, no recovery event" — correct for Phase 2, whose only prospective consumer (alert routing) could infer recovery from the absence of further offline detections. Phase 6's OfflineCountProjection cannot: a current offline-count-per-store gauge needs an explicit signal to decrement on, and "absence of further offline events" is not a signal a fold can consume.
+
+So the detector now emits a device.online DetectionEvent (severity INFO) on the offline -> seen transition, mirroring the offline emission's shape and derived identity (derive("detection.device_online", store_id, device_id, source_event.event_id)). A seen -> seen or unseen -> seen transition is not a recovery and emits nothing; an unregistered store at recovery time skips emission, the same contract the offline path follows.
+
+This does not contradict D-7 so much as meet the condition D-7 implicitly waited for: recovery becomes an event when a consumer genuinely needs it as one. The discriminator-pattern schema (D-8) made this a zero-cost upstream change — device.online matches the detection_type pattern constraint, so no contract bump was required, only a new type constant and the emission. This is the D-11 "budget for an upstream PR" turning out unspent, exactly as the Phase 6 plan allowed for.
+
+Relationship to D-10: the same lesson at a different boundary. D-10 said trace a deferred callable's production data path before accepting the deferral; D-16 is what happens when a later phase's consumer needs a signal an earlier phase chose not to emit — caught cleanly because the projection's data path was traced before the projection was built, not after.
+
+
+### D-17 — Dashboard projections fold via idempotent set membership, not counters
+
+OfflineCountProjection needs a current-offline-count-per-store gauge. The naive fold is an integer counter: increment on device.offline, decrement on device.online. It is wrong. Detections reach a projection over an at-least-once channel — EventBridge re-delivers, and replay re-runs the same event sequence (the reason Phase 5's alert idempotency keys exist, D-14). A duplicated device.offline permanently inflates a counter and the drift never heals.
+
+So the projection holds, per store, the set of currently-offline device ids: device.offline adds the id, device.online discards it, and the gauge is the set's cardinality. Adding a present id is a no-op; discarding an absent id is a no-op. The fold is therefore idempotent under duplicate delivery, and correct under flapping (offline -> online -> offline collapses to cardinality 1) and under a device going offline twice without an intervening recovery. The set is serialised as a sorted JSON array so the persisted bytes are arrival-order-independent; the key is deleted when the set empties, bounding the view to currently-affected stores.
+
+This is the DDIA Chapter 11 materialised-view-over-a-Chapter-9 at-least-once-stream discipline: a fold over an at-least-once stream must be idempotent or the view rots. The principle is not specific to offline counts — the other two Phase 6 projections (active-outage set cardinality, anomaly-rate rolling window) face the same duplicate-delivery condition and inherit the same default: prefer an idempotent set/membership fold over an accumulating counter wherever the input is a redeliverable event. Counters are admissible only where the increment is itself keyed by something that makes redelivery a no-op.
+
+
+### D-18 — OutageDetector emits a store.recovered event on clear, mirroring D-16
+
+D-7 made the same call for OutageDetector that it made for OfflineDetector: transition into outage emits, transition back to not-outage clears state silently. Correct for Phase 2, whose only consumer (alert routing) could infer recovery from the absence of further outage detections. Phase 6's ActiveOutageProjection cannot: a current-active-outage view needs an explicit signal to remove a store from the active set on, and "absence of further outage events" is not a signal a fold can consume — the identical gap D-16 closed for offline.
+
+So the detector now emits a store.recovered DetectionEvent (severity INFO) on the outage -> not-outage transition. The clear is even cleaner to emit than offline's was: the transition is already a discrete window emission the detector handles and computes everything a recovery event needs (store_id, window bounds, the now-sub-threshold ratio); it simply declined to emit. Identity is derived the same way the outage event's is (derive over store_id and window bounds), so it stays replay-deterministic. A below-threshold emission for a store not in outage is not a recovery and emits nothing — the same "once per transition" contract the outage entry follows.
+
+As with D-16 this was a zero-cost upstream change: the discriminator pattern (D-8) means store.recovered is a new detection_type string matching the existing constraint, not a contract bump — a new type constant and the emission, nothing more. The pattern is now established twice (device.online, store.recovered): a detector's silent-clear becomes an emitted recovery event the moment a current-state consumer needs the transition as a signal. The third detector (AnomalyDetector) will face the same question if and when a projection needs its recovery; the move is the same and cheap.
+
+
+### D-19 — Global current-set projections use key-per-presence, not a single hot key
+
+OfflineCountProjection is a partitioned view: one gauge per store, read by store id. ActiveOutageProjection is the first global view — "which stores are in outage right now, and how many" — and global views invite a tempting layout: one fixed key holding the whole set, read in a single round-trip. Rejected. Every transition would be a read-modify-write on that one key, and under a fleet-wide event many stores transition at once, making it a contention point and, on the DynamoDB backend, a hot partition (DDIA Chapter 6).
+
+So a global current-set is stored as one key per present member under a shared view: store.outage writes the store's key, store.recovered deletes it, the set is keys(view) and its cardinality is the count. Each transition is an independent point write that contends with nothing, and it reuses the exact keys(view)-enumerates-the-set pattern OfflineCountProjection already uses, so partitioned and global projections read consistently. The idempotency property from D-17 carries over unchanged: a point write is last-write-wins (duplicate delivery is a no-op), a delete of an absent key is a no-op.
+
+The cost accepted is that counting the set is a keys(view) enumeration rather than a single read — a bounded scan, since the number of currently-affected members is small even in a bad event. The stored value carries free provenance (the outage's detected_at) rather than a bare sentinel; the fold's own logic only reads presence. The third projection (anomaly rate) faces the same global-view question and inherits this default: prefer key-per-presence over a single accumulating key wherever the view is a current set rather than a per-entity gauge.
+
 ## Known issues
 
 Things we know about and have decided how to handle.
 
 ### Active
+
+- **`AnomalyRateProjection` in-memory store grows without bound.** Eviction-(i): the projection's `observe()` is a pure bucketing fold with no prune, by design. Bucket storage is bounded by the backend, not the fold - the DynamoDB store (Phase 6 commit 8) will set a TTL on bucket keys from the retention horizon. The `InMemoryProjectionStore` does not evict, so a long-running non-DynamoDB process accumulates one key per signal per time bucket indefinitely. Acceptable for tests (short-lived) and for the DynamoDB-backed production path; flagged so the TTL is not forgotten when the DynamoDB store lands.
 
 - **`structured-logging-python` emits stdlib-logging warnings during `error()` calls.** Every test run produces four `--- Logging error ---` lines from `tests/streaming/test_observability.py`. Tests pass; the artefact pollutes test output. Pre-existing since Phase 1; deterministic; reproducer is a single 4-line `python3 -c` snippet. Decision pending: fix upstream now (small PR + SHA bump) vs defer to a later cleanup pass.
 

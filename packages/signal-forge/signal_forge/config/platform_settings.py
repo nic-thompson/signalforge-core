@@ -103,6 +103,29 @@ def _validate_bus_name(name: str, field_name: str) -> None:
             f"underscore: {name!r}"
         )
 
+_TABLE_NAME_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9._-]+$")
+_TABLE_NAME_MIN_LENGTH: Final[int] = 3
+_TABLE_NAME_MAX_LENGTH: Final[int] = 255
+
+
+def _validate_table_name(name: str, field_name: str) -> None:
+    """
+    Validate a DynamoDB table name against AWS naming rules.
+
+    Catches typos at startup. AWS's spec: 3-255 chars, drawn from
+    a-z, A-Z, 0-9, dot, dash, underscore.
+    """
+    if not (_TABLE_NAME_MIN_LENGTH <= len(name) <= _TABLE_NAME_MAX_LENGTH):
+        raise ValueError(
+            f"{field_name} must be {_TABLE_NAME_MIN_LENGTH}-"
+            f"{_TABLE_NAME_MAX_LENGTH} chars, got {len(name)}: {name!r}"
+        )
+    if not _TABLE_NAME_PATTERN.match(name):
+        raise ValueError(
+            f"{field_name} must be alphanumeric, dot, dash or "
+            f"underscore: {name!r}"
+        )
+
 # ---------------------------------------------------------------------------
 # Settings object
 # ---------------------------------------------------------------------------
@@ -163,6 +186,17 @@ class PlatformSettings:
     # publishing replay alerts to the live bus (the safer failure mode).
     replay_alert_bus: str | None = None
 
+    # DynamoDB table for live dashboard projections (Phase 6). None means
+    # "no projection store configured" — the store no-ops rather than
+    # failing. Projections still update in memory; only their persistence
+    # to DynamoDB is gated on this being set.
+    projection_table: str | None = None
+
+    # DynamoDB table for replay-isolated projections. for_replay() swaps
+    # the active table; a missing replay table no-ops rather than writing
+    # replay projections to the live table (the safer failure mode).
+    replay_projection_table: str | None = None
+
     # ------------------------------------------------------------------
     # Construction
     # ------------------------------------------------------------------
@@ -200,6 +234,13 @@ class PlatformSettings:
             _validate_bus_name(self.alert_bus, "alert_bus")
         if self.replay_alert_bus is not None:
             _validate_bus_name(self.replay_alert_bus, "replay_alert_bus")
+
+        if self.projection_table is not None:
+            _validate_table_name(self.projection_table, "projection_table")
+        if self.replay_projection_table is not None:
+            _validate_table_name(
+                self.replay_projection_table, "replay_projection_table"
+            )
 
     # ------------------------------------------------------------------
     # Factories
@@ -240,6 +281,8 @@ class PlatformSettings:
             replay_dataset_bucket=source.get("SF_REPLAY_DATASET_BUCKET") or None,
             alert_bus=source.get("SF_ALERT_BUS") or None,
             replay_alert_bus=source.get("SF_REPLAY_ALERT_BUS") or None,
+            projection_table=source.get("SF_PROJECTION_TABLE") or None,
+            replay_projection_table=source.get("SF_REPLAY_PROJECTION_TABLE") or None,
         )
 
     def for_replay(self, replay_environment: str = "replay") -> PlatformSettings:
@@ -257,6 +300,10 @@ class PlatformSettings:
         The alert bus swaps the same way, for the same reason: a replay
         run publishes to the replay bus, or to nothing if no replay bus
         is configured, never to the live bus.
+
+        The projection table swaps the same way, for the same reason: a
+        replay run writes projections to the replay table, or to nothing,
+        never to the live table.
         """
 
         return replace(
@@ -264,6 +311,7 @@ class PlatformSettings:
             environment=replay_environment,
             dataset_bucket=self.replay_dataset_bucket,
             alert_bus=self.replay_alert_bus,
+            projection_table=self.replay_projection_table,
         )
 
 

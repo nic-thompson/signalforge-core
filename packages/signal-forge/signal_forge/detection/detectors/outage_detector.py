@@ -7,20 +7,22 @@ Observes window emissions from a DistinctCountAggregation registered
 under the name "distinct_devices". For each emission, computes the
 offline ratio for the store (1 - reporting / registered) and emits a
 DetectionEvent when the ratio crosses threshold_ratio. State machine
-mirrors OfflineDetector's: transition into outage emits, transition
-back to not-outage resets silently.
+mirrors OfflineDetector's: transition into outage emits a store.outage
+detection, transition back to not-outage emits a store.recovered
+detection (D-18, revisiting D-7).
 
 Replay-deterministic: same input emission sequence produces the same
 output detection sequence, including detection_id and source_event_id.
 Those identity fields are derived via signal_forge.identity.derive
-(UUIDv5 over stable coordinates — store_id and window bounds), not
+(UUIDv5 over stable coordinates - store_id and window bounds), not
 minted as uuid4, so two runs over the same emissions produce
 byte-identical identities. (They were uuid4-based through Phases 2-3
 and made deterministic when the Phase 4 dataset layer's replay
 byte-identity test required it.)
 
 Design notes captured in docs/working-notes.md under D-7 (state
-machine semantics) and D-8 (DetectionEvent schema).
+machine semantics), D-8 (DetectionEvent schema), and D-18 (recovery
+emission).
 """
 
 from __future__ import annotations
@@ -37,14 +39,18 @@ from event_schema_contracts.detection import (
     DetectionSeverity,
 )
 
-from signal_forge.detection.types import DETECTION_TYPE_STORE_OUTAGE
+from signal_forge.detection.types import (
+    DETECTION_TYPE_STORE_OUTAGE,
+    DETECTION_TYPE_STORE_RECOVERED,
+)
 from signal_forge.identity import derive
 from signal_forge.streaming.window_aggregator import WindowEmission
 
 # State machine: not_outage (implicit, store not in dict) -> outage.
-# Transition into outage emits one detection. Transition back to
-# not_outage resets state silently; recovery is not a detection event
-# in Phase 2.
+# Transition into outage emits one store.outage detection. Transition
+# back to not_outage emits one store.recovered detection and clears
+# state (D-18). A below-threshold emission for a store not in outage is
+# not a recovery and emits nothing.
 _StoreState = Literal["outage"]
 
 
@@ -53,7 +59,8 @@ class OutageDetector:
     """
     Emission detector emitting DetectionEvents when more than
     ``threshold_ratio`` of a store's devices are not reporting in a
-    window.
+    window, and a recovery detection when the ratio falls back to or
+    below threshold.
 
     Parameters
     ----------
@@ -66,7 +73,7 @@ class OutageDetector:
         Callable mapping a store_id to its count of registered
         devices, or ``None`` if the store is not registered. Stores
         with no registered devices (count == 0) or unregistered
-        stores (lookup returns None) are skipped silently — there's
+        stores (lookup returns None) are skipped silently - there's
         no meaningful ratio to compute.
     """
 
@@ -121,10 +128,25 @@ class OutageDetector:
                 )
             ]
         else:
-            # Below threshold. If we were in outage, reset state
-            # silently. Recovery is not a detection event in Phase 2.
+            # At or below threshold. If we were in outage, the store has
+            # recovered: clear state and emit a store.recovered detection
+            # so current-state consumers (ActiveOutageProjection) can fold
+            # the clear. A below-threshold emission for a store not in
+            # outage is not a recovery and emits nothing - the same "once
+            # per transition" contract the outage entry follows, and the
+            # same shape device.online took for offline recovery.
+            # (D-18, revisiting D-7.)
             if currently_in_outage:
                 del self._state[store_id]
+                return [
+                    self._build_recovery(
+                        store_id=store_id,
+                        offline_count=offline_count,
+                        registered=registered,
+                        offline_ratio=offline_ratio,
+                        emission=emission,
+                    )
+                ]
             return []
 
     def _build_detection(
@@ -168,6 +190,63 @@ class OutageDetector:
                 "threshold_ratio": self.threshold_ratio,
                 "window_start": emission.window_start.isoformat(),
                 "window_end": emission.window_end.isoformat(),
+            },
+        )
+        trace_id = (
+            emission.last_contributing_trace_id
+            if emission.last_contributing_trace_id is not None
+            else str(uuid4())
+        )
+        return DetectionEvent(
+            event_id=derive("event.detection", detection_id),
+            event_timestamp=emission.window_end,
+            trace=TraceContext(trace_id=trace_id),
+            payload=payload,
+        )
+
+    def _build_recovery(
+        self,
+        *,
+        store_id: str,
+        offline_count: int,
+        registered: int,
+        offline_ratio: float,
+        emission: WindowEmission,
+    ) -> DetectionEvent:
+        reporting = registered - offline_count
+        offline_pct = round(offline_ratio * 100)
+        threshold_pct = round(self.threshold_ratio * 100)
+        detection_id = derive(
+            "detection.store_recovered",
+            store_id,
+            emission.window_start,
+            emission.window_end,
+        )
+        payload = DetectionEventPayload(
+            detection_id=detection_id,
+            detection_type=DETECTION_TYPE_STORE_RECOVERED,
+            severity=DetectionSeverity.INFO,
+            detected_at=emission.window_end,
+            store_id=store_id,
+            device_id=None,
+            source_event_id=derive(
+                "source.store_recovered",
+                store_id,
+                emission.window_start,
+                emission.window_end,
+            ),
+            threshold_breached=(
+                f"{reporting} of {registered} devices reporting "
+                f"({offline_pct}% offline, below threshold {threshold_pct}%)"
+            ),
+            details={
+                "offline_count": offline_count,
+                "registered_count": registered,
+                "offline_ratio": offline_ratio,
+                "threshold_ratio": self.threshold_ratio,
+                "window_start": emission.window_start.isoformat(),
+                "window_end": emission.window_end.isoformat(),
+                "recovered": True,
             },
         )
         trace_id = (

@@ -14,8 +14,12 @@ detection:
 - 'Once per transition into outage' semantics: a store that stays
   offline across multiple window emissions emits exactly one
   detection. Recovery and re-entry into outage emit again.
+- The outage->not-outage transition emits a store.recovered
+  detection (severity INFO) so current-state consumers can fold the
+  clear; a below-threshold emission for a store not in outage is
+  silent (D-18).
 - Unregistered stores (registered_count_lookup returns None or 0)
-  are skipped silently — no emission, no state mutation.
+  are skipped silently - no emission, no state mutation.
 - The defensive clamp: reporting_count > registered_count is treated
   as 0 offline rather than negative.
 
@@ -33,6 +37,8 @@ from __future__ import annotations
 import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
+
+from event_schema_contracts.detection import DetectionSeverity
 
 from signal_forge.detection.detectors import OutageDetector
 from signal_forge.detection.device_registry import DeviceRegistry
@@ -188,11 +194,13 @@ class OutageDetectorTest(unittest.TestCase):
         self.assertEqual(third, [])
 
     def test_recovery_then_re_outage_emits_twice(self):
-        # Outage, recovery (silent), outage again — two detections.
-        # Pins the 'flapping store re-emits' semantics from D-7
-        # mirrored to emission-based detection. Critical for long-
-        # running operation: a store that toggles in and out of
-        # outage state must produce a fresh detection on each entry.
+        # Outage, recovery, outage again. The recovery transition now
+        # emits a store.recovered detection (D-18), so the full
+        # sequence is outage / recovered / outage. Pins the 'flapping
+        # store re-emits' semantics from D-7 mirrored to emission-based
+        # detection. Critical for long-running operation: a store that
+        # toggles in and out of outage must produce a fresh detection
+        # on each transition.
         first = self.detector.observe_emission(
             _emission(store_id="store-1", reporting_count=10)
         )
@@ -212,13 +220,68 @@ class OutageDetectorTest(unittest.TestCase):
             )
         )
         self.assertEqual(len(first), 1)
-        self.assertEqual(recovery, [])
+        self.assertEqual(first[0].payload.detection_type, "store.outage")
+        # The recovery transition emits a store.recovered detection.
+        self.assertEqual(len(recovery), 1)
+        self.assertEqual(recovery[0].payload.detection_type, "store.recovered")
         self.assertEqual(len(second), 1)
-        # Distinct detection_ids — each transition is its own event.
+        self.assertEqual(second[0].payload.detection_type, "store.outage")
+        # Distinct detection_ids - each transition is its own event.
         self.assertNotEqual(
             first[0].payload.detection_id,
             second[0].payload.detection_id,
         )
+
+    def test_recovery_emits_store_recovered_with_shape(self):
+        # Enter outage, then recover. The recovery detection carries
+        # store_id, detection_type = "store.recovered", severity INFO,
+        # no device_id, and the post-recovery ratio context in details.
+        self.detector.observe_emission(
+            _emission(store_id="store-1", reporting_count=10)
+        )
+        recovery = self.detector.observe_emission(
+            _emission(
+                store_id="store-1",
+                reporting_count=45,  # 5 of 50 offline = 10%, below 50%
+                window_seconds_offset=300,
+            )
+        )
+        self.assertEqual(len(recovery), 1)
+        r = recovery[0]
+        self.assertEqual(r.payload.detection_type, "store.recovered")
+        self.assertEqual(r.payload.severity, DetectionSeverity.INFO)
+        self.assertEqual(r.payload.store_id, "store-1")
+        self.assertIsNone(r.payload.device_id)
+        self.assertEqual(r.payload.details["offline_count"], 5)
+        self.assertEqual(r.payload.details["registered_count"], 50)
+        self.assertEqual(r.payload.details["offline_ratio"], 0.1)
+        self.assertEqual(r.payload.details["threshold_ratio"], 0.5)
+        self.assertTrue(r.payload.details["recovered"])
+
+    def test_recovery_emits_once_not_on_every_below_threshold_emission(self):
+        # Enter outage, recover (emits once), then a further below-
+        # threshold emission must be silent: the store is no longer in
+        # outage, so there is no transition to report.
+        self.detector.observe_emission(
+            _emission(store_id="store-1", reporting_count=10)
+        )
+        first_recovery = self.detector.observe_emission(
+            _emission(
+                store_id="store-1",
+                reporting_count=45,
+                window_seconds_offset=300,
+            )
+        )
+        second_below = self.detector.observe_emission(
+            _emission(
+                store_id="store-1",
+                reporting_count=45,
+                window_seconds_offset=600,
+            )
+        )
+        self.assertEqual(len(first_recovery), 1)
+        self.assertEqual(first_recovery[0].payload.detection_type, "store.recovered")
+        self.assertEqual(second_below, [])
 
     def test_unregistered_store_does_not_emit(self):
         # Store "store-unknown" is not in the registry; device_count
@@ -230,7 +293,7 @@ class OutageDetectorTest(unittest.TestCase):
 
     def test_zero_registered_devices_does_not_emit(self):
         # A store with 0 registered devices in the registry is
-        # indistinguishable from an unregistered store — both return
+        # indistinguishable from an unregistered store - both return
         # device_count = 0. The dict-based fixture in Phase 2 could
         # distinguish "known but empty" from "unknown"; with a real
         # registry they collapse to the same case. The detector's

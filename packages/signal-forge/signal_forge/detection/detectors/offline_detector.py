@@ -28,7 +28,7 @@ from event_schema_contracts.detection import (
     DetectionSeverity,
 )
 
-from signal_forge.detection.types import DETECTION_TYPE_DEVICE_OFFLINE
+from signal_forge.detection.types import DETECTION_TYPE_DEVICE_OFFLINE, DETECTION_TYPE_DEVICE_ONLINE
 from signal_forge.identity import derive
 from signal_forge.streaming.event_protocol import TelemetryEvent
 
@@ -92,10 +92,23 @@ class OfflineDetector:
         self._last_seen[device_id] = event.event_timestamp
         self._state[device_id] = "seen"
 
-        # Recovery transition: was offline, now back. No emission;
-        # tracked silently. Logging the transition belongs to Phase 5,
-        # not to a detector whose contract is "fire on offline".
-        _ = previous_state  # explicit no-op; documents the read
+        # Recovery transition: was offline, now reporting again. Emit a
+        # device.online recovery detection so current-state consumers
+        # (dashboard projections) can decrement their offline count. A
+        # seen->seen or unseen->seen transition is not a recovery and
+        # emits nothing. Skips emission for an unregistered store, the
+        # same contract the offline path follows. (D-16, revisiting D-7.)
+        recovery: list[DetectionEvent] = []
+        if previous_state == "offline":
+            recovery_store = self.store_lookup(device_id)
+            if recovery_store:
+                recovery.append(
+                    self._build_recovery(
+                        device_id=device_id,
+                        store_id=recovery_store,
+                        source_event=event,
+                    )
+                )
 
         # Scan all known devices for silence breaches. Skip devices
         # already in the offline state (they emitted on entry).
@@ -120,7 +133,7 @@ class OfflineDetector:
                     source_event=event,
                 )
             )
-        return detections
+        return recovery + detections
 
     def _build_detection(
         self,
@@ -150,6 +163,34 @@ class OfflineDetector:
                 "silent_seconds": silent_seconds,
                 "threshold_seconds": self.threshold_seconds,
             },
+        )
+        return DetectionEvent(
+            event_id=derive("event.detection", detection_id),
+            event_timestamp=source_event.event_timestamp,
+            trace=TraceContext(trace_id=source_event.trace.trace_id),
+            payload=payload,
+        )
+
+    def _build_recovery(
+        self,
+        *,
+        device_id: UUID,
+        store_id: str,
+        source_event: TelemetryEvent,
+    ) -> DetectionEvent:
+        detection_id = derive(
+            "detection.device_online", store_id, device_id, source_event.event_id
+        )
+        payload = DetectionEventPayload(
+            detection_id=detection_id,
+            detection_type=DETECTION_TYPE_DEVICE_ONLINE,
+            severity=DetectionSeverity.INFO,
+            detected_at=source_event.event_timestamp,
+            store_id=store_id,
+            device_id=device_id,
+            source_event_id=source_event.event_id,
+            threshold_breached="device reporting again after silence",
+            details={"recovered": True},
         )
         return DetectionEvent(
             event_id=derive("event.detection", detection_id),

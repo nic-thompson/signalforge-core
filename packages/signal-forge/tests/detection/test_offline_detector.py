@@ -16,7 +16,9 @@ Verifies the EventDetector contract for offline detection:
   emission time — the DetectionEvent schema requires non-empty
   store_id, so unrooted devices produce no detection.
 - A device that goes offline and then receives an event transitions
-  back to seen silently. No emission on recovery.
+  back to seen and emits one device.online recovery detection, so
+  current-state consumers can decrement their offline count (D-16,
+  revisiting D-7's original no-recovery-event stance).
 - A device that flaps (seen -> offline -> seen -> offline) emits a
   fresh detection on each new offline transition. Pins the
   'once per offline transition event' semantics from D-7.
@@ -33,8 +35,11 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from event_schema_contracts.detection import DetectionSeverity
+
 from signal_forge.detection.detectors import OfflineDetector
 from signal_forge.detection.device_registry import DeviceRegistry
+from signal_forge.detection.types import DETECTION_TYPE_DEVICE_ONLINE
 from signal_forge.streaming.event_protocol import TelemetryEvent
 from tests._fixtures.events import FakeEvent
 from tests._fixtures.payloads import FakeDevicePayload
@@ -130,19 +135,41 @@ class OfflineDetectorTest(unittest.TestCase):
         )
         self.assertEqual(detections, [])
 
-    def test_device_returning_to_seen_after_offline_emits_nothing(self):
+    def test_device_returning_to_seen_after_offline_emits_recovery(self):
         # Device A goes offline, then sends an event. The recovery
-        # transition is silent — no DetectionEvent.
+        # transition emits one device.online detection (D-16).
         self.detector.observe_event(_event_at(0, device_id=self.device_a))
         offline_detections = self.detector.observe_event(
             _event_at(350, device_id=self.device_b)
         )
         self.assertEqual(len(offline_detections), 1)  # confirm setup
-        # Device A returns at t=400. No detection.
+        # Device A returns at t=400 — one recovery detection.
         recovery_detections = self.detector.observe_event(
             _event_at(400, device_id=self.device_a)
         )
-        self.assertEqual(recovery_detections, [])
+        self.assertEqual(len(recovery_detections), 1)
+        recovery = recovery_detections[0]
+        self.assertEqual(
+            recovery.payload.detection_type, DETECTION_TYPE_DEVICE_ONLINE
+        )
+        self.assertEqual(recovery.payload.severity, DetectionSeverity.INFO)
+        self.assertEqual(recovery.payload.device_id, self.device_a)
+        self.assertEqual(recovery.payload.store_id, "store-1")
+
+    def test_unseen_to_seen_is_not_a_recovery(self):
+        # A device's first-ever event is not a recovery — no emission.
+        recovery = self.detector.observe_event(
+            _event_at(0, device_id=self.device_a)
+        )
+        self.assertEqual(recovery, [])
+
+    def test_seen_to_seen_is_not_a_recovery(self):
+        # A device reporting normally (never offline) emits no recovery.
+        self.detector.observe_event(_event_at(0, device_id=self.device_a))
+        recovery = self.detector.observe_event(
+            _event_at(10, device_id=self.device_a)
+        )
+        self.assertEqual(recovery, [])
 
     def test_flapping_device_emits_on_each_offline_transition(self):
         # The headline test: device A goes offline, recovers, goes
@@ -154,7 +181,9 @@ class OfflineDetectorTest(unittest.TestCase):
         first_offline = self.detector.observe_event(
             _event_at(350, device_id=self.device_b)
         )
-        # A recovers.
+        # A recovers — this now emits a device.online detection (D-16),
+        # asserted in the recovery test; here we only care about the
+        # offline transitions, so the return value is intentionally unused.
         self.detector.observe_event(_event_at(400, device_id=self.device_a))
         # B advances time again, A has been silent since 400.
         second_offline = self.detector.observe_event(
