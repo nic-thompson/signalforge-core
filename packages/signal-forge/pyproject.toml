@@ -1,6 +1,6 @@
 [project]
 name = "signal-forge"
-version = "0.1.0"
+version = "1.0.0"
 description = "Analytics, detection, replay and dataset control plane for the SignalForge telemetry intelligence platform"
 requires-python = ">=3.11"
 authors = [
