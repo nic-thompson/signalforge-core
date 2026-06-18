@@ -1,251 +1,34 @@
 # structured-logging-python
 
-Structured JSON logging and distributed trace propagation for the **SignalForge telemetry intelligence platform**.
+Structured JSON logging and distributed trace propagation for the **SignalForge** telemetry intelligence platform.
 
-This repository provides the canonical Python implementation of SignalForge’s structured telemetry logging contract. It enables consistent observability across ingestion pipelines, feature builders, dataset exporters, replay workflows, and inference services.
+This library provides the canonical Python implementation of SignalForge's structured logging contract, giving every service — the parser, the analytics control plane, dataset exporters, and replay workflows — one consistent, trace-aware, machine-readable logging surface. It is a platform infrastructure component, not a generic logging wrapper.
 
-It is not a generic logging wrapper. It is a platform infrastructure component that standardises telemetry emission across service boundaries.
+## Role in the platform
 
----
+SignalForge is composed of cooperating repositories forming a telemetry analytics and dataset-generation system. `structured-logging-python` is the shared observability substrate beneath them:
 
-## Role in the SignalForge Platform
-
-SignalForge is composed of multiple cooperating repositories forming a telemetry analytics and dataset generation system.
-
-`structured-logging-python` provides the observability substrate shared across those services.
-
-Platform relationship:
-
+```
 event-schema-contracts
         ↓
 telemetry-parser
         ↓
 signal-forge
         ↓
-dataset export + replay pipelines
-
-structured-logging-python provides the shared observability substrate across all layers.
+dataset export + replay
 ```
 
-This repository ensures:
+Every layer emits through the same logging contract, so an execution timeline — ingestion → parse → feature generation → dataset export → replay — can be reconstructed from a shared, trace-linked log model. Although developed for SignalForge, it is designed as a reusable structured-logging SDK for distributed Python services in event-driven pipelines.
 
-* schema-stable telemetry events
-* trace continuity across services
-* pipeline-stage attribution
-* latency instrumentation across ingestion boundaries
-* machine-readable failure diagnostics
+## What it provides
 
----
+- **Canonical structured log events** — every log line conforms to a stable schema (`LogEventSchema`): timestamp, level, service, environment, event_type, message, plus optional `trace_id`, `parent_trace_id`, and `correlation_id` lineage fields. `service` and `environment` are injected automatically from configuration.
+- **Distributed trace propagation** — trace context flows across service and execution boundaries via standard propagation headers, so execution graphs can be reconstructed across the pipeline.
+- **Pipeline latency instrumentation** — measure execution time across processing stages.
+- **Machine-readable error diagnostics** — structured failures with stable error codes, suitable for retry classification, dead-letter routing, and alerting.
+- **Runtime adapters** — drop-in instrumentation for FastAPI, AWS Lambda, and async queue workers.
 
-## Platform Architecture Context
-
-`structured-logging-python` is part of the SignalForge telemetry intelligence platform and provides the shared observability substrate used across ingestion pipelines, feature generation services, dataset exporters, and replay workflows.
-
-Within SignalForge, the repository occupies the telemetry contract layer responsible for:
-
-* schema-stable structured log emission
-* distributed trace propagation across execution boundaries
-* pipeline-stage attribution for feature workflows
-* latency instrumentation across dataset generation stages
-* machine-readable diagnostics for replay debugging
-
-Conceptually, it sits between event schema definitions and analytics orchestration:
-
-```
-event-schema-contracts
-        ↓
-structured-logging-python
-        ↓
-signal-forge
-```
-
-This allows SignalForge services to reconstruct execution timelines such as:
-
-```
-API request
-    → queue ingestion
-        → parser execution
-            → feature generation
-                → dataset export
-                    → replay pipeline
-```
-
-using a shared telemetry model.
-
-Although developed as part of SignalForge, the library is designed as a reusable structured logging SDK for distributed Python services participating in event-driven data pipelines.
-
-## What This Library Provides
-
-### Canonical Structured Telemetry
-
-Every log event emitted by SignalForge services conforms to a stable schema:
-
-```
-timestamp
-level
-service
-environment
-trace_id
-event_type
-message
-metadata
-```
-
-The `service` and `environment` fields are injected automatically via ServiceContext, ensuring consistent metadata across services.
-
-Optional lineage fields:
-
-```
-parent_trace_id
-correlation_id
-pipeline_stage
-error_code
-```
-
-These guarantees enable:
-
-* deterministic replay debugging
-* dataset lineage reconstruction
-* ingestion pipeline filtering
-* CloudWatch Insights queries
-* Athena analytics workflows
-
----
-
-### Distributed Trace Propagation
-
-Trace context propagates automatically across:
-
-* FastAPI inference endpoints
-* AWS Lambda orchestration steps
-* async queue workers
-* feature generation stages
-* dataset export boundaries
-
-Trace identifiers:
-
-```
-trace_id
-parent_trace_id
-correlation_id
-pipeline_stage
-```
-
-Propagation headers:
-
-```
-x-trace-id
-x-parent-trace-id
-x-correlation-id
-x-pipeline-stage
-```
-
-This allows reconstruction of execution graphs across the full SignalForge pipeline.
-
----
-
-### Pipeline Latency Instrumentation
-
-Measure execution time across telemetry processing stages:
-
-```python
-from structured_logging.metrics.latency import measure_pipeline_latency
-
-with measure_pipeline_latency("feature_generation"):
-    generate_embeddings(records)
-```
-
-Emits structured telemetry:
-
-```
-pipeline.latency
-```
-
-Used for:
-
-* ingestion delay diagnostics
-* dataset freshness monitoring
-* exporter performance tracking
-* replay comparison baselines
-* SLA enforcement
-
----
-
-### Machine-Readable Error Diagnostics
-
-Emit structured failures with stable error identifiers:
-
-```python
-logger.emit_error(
-    error_code="SCHEMA_VERSION_UNSUPPORTED",
-    message="Unsupported schema version detected",
-)
-```
-
-Supports:
-
-* retry classification
-* dead-letter routing
-* anomaly clustering
-* alert automation
-* ingestion filtering
-
----
-
-## Runtime Integration Adapters
-
-Adapters instrument service boundaries automatically.
-
-### FastAPI
-
-```
-configure_fastapi_logging(app)
-```
-
-Provides:
-
-* request trace initialisation
-* structured exception telemetry
-* response lifecycle logging
-* request latency measurement
-
----
-
-### AWS Lambda
-
-```
-@lambda_logging_handler()
-```
-
-Provides:
-
-* invocation trace restoration
-* cold start detection
-* execution latency telemetry
-* structured failure emission
-
----
-
-### Async Workers
-
-```
-@worker_logging_handler(queue_name="feature-build-queue")
-```
-
-Provides:
-
-* queue trace propagation
-* retry instrumentation
-* dead-letter classification
-* lifecycle telemetry
-
-Supports both synchronous and asynchronous handlers.
-
----
-
-## Example Usage
-
-Structured telemetry event:
+## Core logging
 
 ```python
 from structured_logging.core.logger import StructuredLogger
@@ -258,14 +41,9 @@ logger.info(
 )
 ```
 
-Latency instrumentation:
+`StructuredLogger` exposes `info`, `warning`, `error`, `debug`, the lower-level `log`, and `emit_error`. Each takes a `message`, an optional `event_type`, optional `metadata`, and an optional `trace_id`.
 
-```python
-with measure_pipeline_latency("dataset_export"):
-    export_dataset()
-```
-
-Structured diagnostics:
+Structured error diagnostics carry a stable error code via `emit_error`:
 
 ```python
 logger.emit_error(
@@ -274,105 +52,66 @@ logger.emit_error(
 )
 ```
 
----
+`emit_error` builds a canonical `StructuredError` payload (error code, message, optional exception type, stack trace, severity, retryable flag, and origin) so callers need not construct one directly.
 
-## Repository Structure
+## Latency instrumentation
+
+```python
+from structured_logging.metrics.latency import pipeline_latency
+
+with pipeline_latency("dataset_export"):
+    export_dataset()
+```
+
+`pipeline_latency(stage, logger=None, metadata=None)` is a context manager; `pipeline_latency_decorator` is the equivalent function decorator. Both emit a structured latency event on exit, used for ingestion-delay diagnostics, dataset-freshness monitoring, and replay comparison baselines.
+
+## Trace propagation
+
+Trace context propagates across FastAPI endpoints, Lambda invocations, async queue workers, and pipeline stages. The carried identifiers are `trace_id`, `parent_trace_id`, and `correlation_id`, exchanged over `x-trace-id`, `x-parent-trace-id`, and `x-correlation-id` headers, allowing execution-graph reconstruction across the full pipeline.
+
+## Runtime adapters
+
+Adapters instrument service boundaries with minimal wiring.
+
+**FastAPI** — `configure_fastapi_logging(app)` installs `FastAPILoggingMiddleware`, providing request trace initialisation, structured exception telemetry, response-lifecycle logging, and request-latency measurement.
+
+**AWS Lambda** — the `@lambda_logging_handler()` decorator provides invocation trace restoration, cold-start detection, execution-latency telemetry, and structured failure emission.
+
+**Async workers** — the `@worker_logging_handler(queue_name=...)` decorator provides queue trace propagation, retry instrumentation, and dead-letter classification, with `log_dead_letter_event` and `log_retry_event` helpers. Both synchronous and asynchronous handlers are supported.
+
+## Repository structure
 
 ```
 structured_logging/
-
-core/
-trace/
-metrics/
-schema/
-adapters/
-config/
-
-docs/
-tests/
-scripts/
+├── core/        structured logger, formatter, context
+├── trace/       distributed trace lifecycle and propagation
+├── metrics/     latency instrumentation
+├── schema/      canonical log-event schema
+├── adapters/    FastAPI, Lambda, and worker instrumentation
+└── config/      service/environment settings
 ```
 
-Layer responsibilities:
-
-| Layer    | Responsibility                   |
-| -------- | -------------------------------- |
-| core     | structured logger + formatter    |
-| trace    | distributed trace lifecycle      |
-| metrics  | latency instrumentation          |
-| schema   | canonical telemetry contract     |
-| adapters | service boundary instrumentation |
-
----
+| Layer      | Responsibility                   |
+| ---------- | -------------------------------- |
+| `core`     | structured logger + formatter    |
+| `trace`    | distributed trace lifecycle      |
+| `metrics`  | latency instrumentation          |
+| `schema`   | canonical telemetry log contract |
+| `adapters` | service-boundary instrumentation |
+| `config`   | service and environment settings |
 
 ## Documentation
 
-Architecture overview:
+- `docs/architecture.md` — system topology
+- `docs/trace-model.md` — trace lifecycle model
+- `docs/integration-patterns.md` — integration patterns
+- `docs/logging-contract.md` — telemetry schema contract
 
-```
-docs/architecture.md
-```
-
-Trace lifecycle model:
-
-```
-docs/trace-model.md
-```
-
-Integration patterns:
-
-```
-docs/integration-patterns.md
-```
-
-Telemetry schema contract:
-
-```
-docs/logging-contract.md
-```
-
----
-
-## Development Setup
-
-Create environment:
+## Development
 
 ```
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-Install dependencies:
-
-```
 pip install -e ".[dev]"
-```
-
-Run tests:
-
-```
 pytest
 ```
-
-Bootstrap script available:
-
-```
-scripts/bootstrap.sh
-```
-
----
-
-## Design Goals
-
-This repository enables SignalForge services to produce telemetry that is:
-
-* schema-stable
-* trace-propagated
-* pipeline-stage aware
-* replay-compatible
-* ingestion-safe
-* CloudWatch-native
-
-It serves as the observability foundation for dataset generation and telemetry intelligence workflows across the SignalForge platform.
-
-
