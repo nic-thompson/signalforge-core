@@ -1,77 +1,39 @@
 # event-schema-contracts
 
-**Canonical telemetry event schema contracts for distributed ML platform infrastructure**
+**Canonical telemetry event schema contracts for the SignalForge telemetry intelligence platform**
 
-`event-schema-contracts` defines the authoritative schema interface layer used across ingestion services, parsers, feature pipelines, dataset exporters, replay systems, inference APIs, and experiment tracking layers.
+`event-schema-contracts` defines the authoritative, versioned event schemas shared across every SignalForge service — parsers, the streaming analytics control plane, feature pipelines, dataset exporters, alert routing, and replay workflows. It is the schema authority layer: no service defines event schemas independently of this repository.
 
-This repository serves as the **schema authority layer** for platform-wide data compatibility and enforces deterministic schema evolution guarantees across all services that produce or consume telemetry.
+**Current version:** `v0.6.0`. Backward-compatible within the `v0` line; minor versions add domains and optional fields (see the schema-evolution policy below).
 
 ---
 
 ## Overview
 
-Modern ML platforms require stable, versioned telemetry contracts shared across multiple services. This repository provides:
+The repository provides:
 
-- canonical event envelopes
-- typed telemetry schemas
-- feature vector contracts
-- schema registry resolution
-- semantic version compatibility enforcement
-- deterministic trace lineage propagation
-- replay-safe schema evolution guarantees
+- a canonical `BaseEvent` envelope with identity, timestamp, and trace mixins
+- typed domain payloads — telemetry, detection, features, and alerts
+- a schema registry with `(event_type, schema_version)` resolution
+- semantic-version compatibility enforcement
+- deterministic trace-lineage propagation
+- replay-safe schema-evolution guarantees
 
-It defines the compatibility boundary between:
-
-- ingestion services
-- telemetry parsers
-- enrichment pipelines
-- feature builders
-- dataset exporters
-- inference APIs
-- replay jobs
-- experiment tracking layers
-
-No service should define event schemas independently of this repository.
-
----
-
-## Architecture Role
-
-`event-schema-contracts` functions as:
-
-> the schema authority layer
-
-All platform services depend on it transitively.
-
-It guarantees:
-
-- ingestion boundary validation
-- dataset reproducibility
-- replay determinism
-- schema evolution safety
-- cross-service trace alignment
-- feature lineage integrity
+It defines the compatibility boundary between ingestion, parsing, streaming analytics, feature building, dataset export, alert routing, and replay.
 
 ---
 
 ## Installation
 
-Install a pinned schema version:
+Install a pinned schema version — pinning is what gives downstream services deterministic replay and dataset reproducibility:
 
-```bash
-pip install event-schema-contracts==0.1.0
 ```
-
-Version pinning enables:
-
-- deterministic replay
-- dataset reproducibility
-- safe schema rollout
-- compatibility guarantees across pipelines
+pip install "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.6.0"
+```
 
 For development:
 
-```bash
+```
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -79,9 +41,54 @@ pip install -e ".[dev]"
 
 ---
 
-## Example Usage
+## Event domains
 
-Create a canonical telemetry event:
+The contracts are organised into four payload domains, each carried by the shared `BaseEvent` envelope.
+
+### Telemetry (`telemetry/`)
+
+Device, network, and session events — the raw structured telemetry the parser emits and the streaming layer consumes. `DeviceRegistrationPayload` carries `device_id`, `store_id`, `device_type`, optional `firmware_version`, and `registered_at`; the `store_id` field is what lets downstream consumers project device→store membership.
+
+### Detection (`detection/`)
+
+`DetectionEvent` — a single discriminator-pattern schema for every detection type. `detection_type` (a dotted-lowercase string like `device.offline`, `store.outage`, `signal.anomaly`) selects the shape of the free-form `details` dict; `severity` (a `DetectionSeverity` enum) drives downstream escalation; `store_id` and `threshold_breached` carry denormalised context. One schema covers all detectors, so a new detector type needs no schema change.
+
+### Features (`features/`)
+
+Two feature-vector variants for two distinct uses:
+
+- `FeatureVectorEvent` — entity-centric (`entity_id`, `source_event_id`), for ML feature stores and online inference.
+- `WindowedFeatureVectorEvent` — partition-window-centric (`partition_key`, `window_start`, `window_end`, `feature_values`, `feature_version`), for streaming aggregations and dashboard rollups. This is the variant the SignalForge streaming pipeline emits.
+
+### Alerts (`alerts/`)
+
+- `AlertEvent` — carries the alert's own identity (`alert_id`, permitted to be UUIDv5 so re-deliveries collapse), lineage to the originating detection (`detection_id`), and the detector-assigned `severity` (reusing `DetectionSeverity`, so detection and alerting share one severity vocabulary).
+- `AlertAcknowledgementEvent` — an acknowledgement modelled as an event, so acknowledgement *state* can be projected replay-deterministically by folding the ordered stream. References the alert it resolves by `alert_id`.
+
+---
+
+## Event envelope contract
+
+All canonical events share a structure:
+
+```
+{
+  "schema_version": "v1",
+  "event_id": "uuid",
+  "trace": { "trace_id": "uuid", "root_trace_id": "uuid", "pipeline_stage": "..." },
+  "event_timestamp": "...",
+  "event_type": "device.registration",
+  "payload": { }
+}
+```
+
+The envelope enforces schema identity, timestamp ordering, ingestion-boundary validation, cross-service compatibility, and replay safety.
+
+---
+
+## Example usage
+
+Construct a canonical telemetry event:
 
 ```python
 from uuid import uuid4
@@ -101,83 +108,15 @@ event = DeviceRegistrationEvent(
     ),
     event_timestamp=datetime.now(timezone.utc),
     payload=DeviceRegistrationPayload(
-        "device_id": uuid4(),
-        "device_type": "sensor",
-        "registered_at": datetime.now(timezone.utc),
+        device_id=uuid4(),
+        store_id="store-1",
+        device_type=DeviceType.SENSOR,
+        registered_at=datetime.now(timezone.utc),
     ),
 )
 ```
 
-Validate dynamically via the schema registry:
-
-```python
-from event_schema_contracts.versioning.schema_registry import schema_registry
-
-validated = schema_registry.validate(event.model_dump())
-```
-
----
-
-## Event Envelope Contract
-
-All canonical events follow a shared structure:
-
-```json
-{
-  "schema_version": "v1",
-  "event_id": "uuid",
-  "trace_id": "uuid",
-  "event_timestamp": "...",
-  "ingest_timestamp": "...",
-  "event_type": "device.registration",
-  "source": "ingestion.lambda",
-  "payload": {}
-}
-```
-
-Envelope guarantees:
-
-- schema identity enforcement
-- timestamp ordering correctness
-- ingestion boundary validation
-- cross-service compatibility
-- replay safety
-
----
-
-## Trace Propagation Model
-
-Each event includes deterministic lineage metadata:
-
-| Field | Purpose |
-|------|---------|
-| trace_id | stage-local processing identifier |
-| root_trace_id | pipeline lineage anchor |
-| pipeline_stage | typed processing stage enum |
-
-Pipeline stages include:
-
-- INGESTION
-- VALIDATION
-- ENRICHMENT
-- FEATURE_BUILDING
-- EXPORT
-- INFERENCE
-
-Trace metadata enables:
-
-- cross-service correlation
-- latency attribution
-- replay graph reconstruction
-- dataset lineage tracking
-
----
-
-## Schema Registry
-
-Schemas are registered automatically via subclass identity metadata.
-
-Resolve schemas dynamically:
+Resolve and validate via the schema registry:
 
 ```python
 from event_schema_contracts.versioning.schema_registry import schema_registry
@@ -186,96 +125,60 @@ schema = schema_registry.get_schema(
     event_type="device.registration",
     schema_version="v1",
 )
+validated = schema_registry.validate(event.model_dump())
 ```
-
-Registry guarantees:
-
-- deterministic schema resolution
-- metadata alignment enforcement
-- compatibility fallback support
-- version correctness validation
 
 ---
 
-## Compatibility Model
+## Schema registry
 
-Schemas follow semantic versioning:
-
-```
-vMAJOR
-vMAJOR.MINOR
-vMAJOR.MINOR.PATCH
-```
-
-Allowed changes:
-
-| Change | Allowed |
-|-------|---------|
-| optional field addition | yes (minor version) |
-| metadata extension | yes (minor version) |
-| trace extension | yes (minor version) |
-
-Breaking changes:
-
-| Change | Requires |
-|-------|----------|
-| field removal | major version |
-| type modification | major version |
-| payload restructuring | major version |
-
-Compatibility is enforced automatically by the schema registry.
+Schemas register against `(event_type, schema_version)` via subclass identity metadata. The registry resolves a schema for a given event type and version, lists registered versions, and validates payloads. Resolution is deterministic; compatibility fallback within a major version is supported (a consumer registered for `v1` accepts `v1.1` events).
 
 ---
 
-## Feature Vector Contracts
+## Compatibility model
 
-Feature pipelines emit canonical feature snapshots:
+Schemas follow semantic versioning (`vMAJOR.MINOR.PATCH`).
 
-```python
-from event_schema_contracts.features.feature_vector import FeatureVectorEvent
-```
+| Change                  | Requires      |
+| ----------------------- | ------------- |
+| optional field addition | minor version |
+| metadata / trace extension | minor version |
+| new event domain        | minor version |
+| field removal           | major version |
+| type modification       | major version |
+| payload restructuring   | major version |
 
-Feature vectors include:
-
-| Field | Purpose |
-|------|---------|
-| entity_id | dataset join key |
-| feature_timestamp | feature computation time |
-| feature_values | model inputs |
-| feature_version | schema lineage |
-| source_event_id | telemetry ancestry anchor |
-
-Guarantees:
-
-- deterministic dataset joins
-- replay-safe feature reconstruction
-- feature lineage traceability
+Backward compatibility is guaranteed within a major version, enforced by the registry. The `v0.x` line has accreted the detection, windowed-feature, and alerts domains as minor additions without breaking existing consumers.
 
 ---
 
-## Repository Structure
+## Repository structure
 
 ```
 event_schema_contracts/
-
 ├── base/
 │   ├── base_event.py
-│   ├── metadata.py
+│   ├── domain.py
 │   ├── identity.py
+│   ├── metadata.py
 │   ├── time.py
-│   └── trace.py
-│
+│   ├── trace.py
+│   └── versioning.py
 ├── telemetry/
 │   ├── device_event.py
 │   ├── network_event.py
 │   └── session_event.py
-│
+├── detection/
+│   └── detection_event.py
 ├── features/
-│   └── feature_vector.py
-│
+│   ├── feature_vector.py
+│   └── windowed_feature_vector.py
+├── alerts/
+│   ├── alert_event.py
+│   └── alert_acknowledgement.py
 ├── validation/
 │   └── validators.py
-│
 └── versioning/
     ├── schema_registry.py
     └── compatibility.py
@@ -292,101 +195,19 @@ docs/
 
 ---
 
-## Schema Lifecycle
+## Schema evolution policy
 
-Events move through deterministic processing stages:
+Breaking changes require a major-version increment, migration documentation, replay validation, and dataset-regeneration verification. Backward compatibility holds within a major version.
 
-```
-creation → validation → enrichment → feature extraction → dataset export → inference
-```
-
-Each boundary enforces:
-
-- schema identity correctness
-- timestamp ordering validation
-- compatibility guarantees
-- lineage propagation integrity
+See `docs/schema-versioning.md` and `docs/compatibility-policy.md`.
 
 ---
 
-## Validation Guarantees
+## Development
 
-Contracts enforce:
-
-| Validation | Layer |
-|-----------|------|
-| UUIDv4 enforcement | identity mixin |
-| UTC timestamp enforcement | time mixin |
-| schema identity alignment | BaseEvent |
-| trace lineage integrity | TraceContext |
-| registry correctness | schema_registry |
-| version compatibility | compatibility engine |
-
----
-
-## Development Workflow
-
-Run tests:
-
-```bash
+```
+pip install -e ".[dev]"
 pytest
 ```
 
-Tests validate:
-
-- schema identity enforcement
-- registry resolution correctness
-- compatibility guarantees
-- timestamp ordering rules
-- payload type integrity
-
----
-
-## Version Pinning Policy
-
-All downstream services must pin schema versions:
-
-```bash
-pip install event-schema-contracts==0.1.0
-```
-
-This ensures:
-
-- reproducible datasets
-- deterministic replay
-- safe schema rollout
-- cross-service compatibility stability
-
----
-
-## Schema Evolution Policy
-
-Breaking changes require:
-
-1. major version increment
-2. migration documentation
-3. replay validation
-4. dataset regeneration verification
-
-Backward compatibility is guaranteed within major versions.
-
-See:
-
-- docs/schema-versioning.md
-- docs/compatibility-policy.md
-
----
-
-## Platform Contract Guarantee
-
-`event-schema-contracts` defines the compatibility boundary between platform services.
-
-It guarantees:
-
-- ingestion boundary correctness
-- feature pipeline stability
-- dataset reproducibility
-- inference input contract integrity
-- replay-safe schema evolution
-
-All platform telemetry must conform to schemas defined in this repository.
+Tests validate schema identity enforcement, registry resolution, compatibility guarantees, timestamp-ordering rules, and payload-type integrity.
