@@ -67,9 +67,9 @@ class PipelineLatency(ContextDecorator):
 
         return self
 
-    def __exit__(self, exc_type, exc, exc_tb) -> bool:
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
         if self.start_time is None:
-            return False
+            return
 
         end_time = time.perf_counter()
         end_timestamp = datetime.now(timezone.utc).isoformat()
@@ -101,8 +101,7 @@ class PipelineLatency(ContextDecorator):
 
         # Restore previous trace context
         TraceContext.restore(self._trace_token)
-
-        return False
+        
 
 
 def pipeline_latency(
