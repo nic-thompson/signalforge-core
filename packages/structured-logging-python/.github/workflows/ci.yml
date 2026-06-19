@@ -1,0 +1,45 @@
+# CI workflow for structured-logging-python
+#
+# One job: test (pytest matrix over Python 3.11 and 3.12).
+#
+# A mypy --strict typecheck job is intended but not yet added: the codebase
+# currently has a backlog of strict-mode type errors in the adapters layer
+# that will be cleared in a dedicated follow-up PR, after which the typecheck
+# job and the mypy dev-dependency will be added here.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -v
