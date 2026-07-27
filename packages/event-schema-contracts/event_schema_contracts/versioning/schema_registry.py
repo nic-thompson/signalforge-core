@@ -1,3 +1,23 @@
+"""
+Resolution of ``(event_type, schema_version)`` pairs to schema classes.
+
+The registry is the lookup used at the ingestion boundary: given a raw event
+dict off the wire, find the schema class that should validate it.
+
+Population is implicit. Schema classes register themselves as a side effect of
+``BaseEvent.__init_subclass__`` running, which happens when the module defining
+them is imported. A schema is therefore invisible to the registry until
+something has imported its module — importing this module alone registers
+nothing, and importing the ``event_schema_contracts`` package root does not
+import the domain subpackages. Callers resolving events off the wire need the
+relevant domain module imported first; note that ``get_schema`` reports an
+unimported schema and a genuinely unregistered one with the same ``KeyError``.
+
+``schema_registry`` at the bottom of this module is the process-wide instance
+that ``BaseEvent`` writes to by name. Instantiating ``SchemaRegistry`` directly
+produces an empty registry that no schema class will ever populate.
+"""
+
 from typing import Dict, Tuple, Type, Any
 
 from pydantic import ValidationError
@@ -36,6 +56,14 @@ class SchemaRegistry:
         event_type: str,
         schema_version: str,
     ) -> bool:
+        """
+        Report whether an exact ``(event_type, schema_version)`` is registered.
+
+        Exact match only — unlike ``get_schema``, this does not consider
+        compatible fallbacks, so a version that would resolve successfully can
+        still report ``False`` here.
+        """
+
         return (event_type, schema_version) in self._registry
 
     def register(
@@ -45,11 +73,17 @@ class SchemaRegistry:
             schema: Type["BaseEvent[Any]"],
     ) -> None:
         """
-        Register schema for event_type + version.
+        Register ``schema`` against ``(event_type, schema_version)``.
+
+        Raises ``ValueError`` if the pair is already taken. Called from
+        ``BaseEvent.__init_subclass__``, which re-raises that as ``TypeError``.
         """
 
         key = (event_type, schema_version)
 
+        # Two classes claiming the same (event_type, schema_version) is an
+        # ambiguous contract — resolution could not be deterministic — so we
+        # refuse the second registration rather than silently overwrite.
         if key in self._registry:
             raise ValueError(
                 f"Schema already registered for {event_type} {schema_version}"
@@ -63,10 +97,17 @@ class SchemaRegistry:
             schema_version: str,
     ) -> Type["BaseEvent[Any]"]:
         """
-        Resolve schema class for event_type + version.
+        Resolve the schema class for ``event_type`` at ``schema_version``.
 
-        Support forward-compatible fallback lookup using the
-        closest available compatible schema version.
+        An exact match wins. Failing that, falls back to the lowest registered
+        version >= requested within the same major version. Lowest-not-highest
+        is deliberate: it exposes the consumer to the fewest fields added after
+        the version it asked for, keeping resolution as close as possible to
+        the requested contract.
+
+        Raises ``KeyError`` if nothing compatible is registered — which
+        includes the case where the defining module has simply not been
+        imported yet.
         """
 
         key = (event_type, schema_version)
@@ -111,8 +152,13 @@ class SchemaRegistry:
             event: Dict[str, Any],
     ) -> "BaseEvent[Any]":
         """
-        Validate raw event dict against registered schema.
-        
+        Resolve the schema for a raw event dict and validate against it.
+
+        Reads ``metadata.event_type`` and ``metadata.schema_version`` to pick
+        the schema, then delegates to it. Raises ``ValueError`` for malformed
+        input or failed validation, and ``KeyError`` (from ``get_schema``) when
+        no compatible schema is registered.
+
         Expected structure:
 
         {
@@ -149,6 +195,13 @@ class SchemaRegistry:
             ) from exc
         
     def list_versions(self, event_type: str) -> list[str]:
+        """
+        Return every registered version string for ``event_type``, sorted.
+
+        Sorting is lexical, not semantic, so this is a listing aid rather than
+        a way to find the newest version.
+        """
+
         return sorted(
             version
             for (etype, version) in self._registry
@@ -156,6 +209,13 @@ class SchemaRegistry:
         )
     
     def list_registered(self) -> Dict[SchemaKey, Type["BaseEvent[Any]"]]:
+        """
+        Return a shallow copy of the full registry mapping.
+
+        Reflects only what has been imported so far, so it is a view of the
+        current process rather than of every schema the library defines.
+        """
+
         return dict(self._registry)
         
 schema_registry = SchemaRegistry()
