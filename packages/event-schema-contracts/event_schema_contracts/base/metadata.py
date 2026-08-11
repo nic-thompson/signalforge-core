@@ -1,3 +1,11 @@
+"""
+Schema identity metadata carried by every event.
+
+``EventMetadata`` answers three questions about an event: what kind it is,
+which version of that contract it conforms to, and which service emitted it.
+The first two are what the registry routes on.
+"""
+
 from pydantic import BaseModel, Field, field_validator
 import re
 
@@ -38,6 +46,13 @@ class EventMetadata(BaseModel):
     @field_validator("schema_version")
     @classmethod
     def validate_schema_version(cls, value: str) -> str:
+        """
+        Require the ``v<major>[.<minor>...]`` form, e.g. ``v1`` or ``v1.1``.
+
+        Note this is the registry's version format, which is not the same as
+        the strict ``MAJOR.MINOR.PATCH`` semver enforced by ``SemVerModel``.
+        """
+
         if not SEMVER_PATTERN.match(value):
             raise ValueError(
                 "schema_version must match pattern v<major>[.<minor>...]"
@@ -47,6 +62,13 @@ class EventMetadata(BaseModel):
     @field_validator("event_type")
     @classmethod
     def validate_event_type(cls, value: str) -> str:
+        """
+        Require the dotted ``<domain>.<action>`` form, e.g. ``device.registration``.
+
+        The namespacing is what keeps event types from colliding as domains are
+        added to the registry.
+        """
+
         if not EVENT_TYPE_PATTERN.match(value):
             raise ValueError(
                 "event_type must match pattern <domain>.<action>[.<subaction>...]"
@@ -56,6 +78,15 @@ class EventMetadata(BaseModel):
     @field_validator("source")
     @classmethod
     def validate_source(cls, value: str) -> str:
+        """
+        Require a lowercase alphanumeric service name, optionally separated by
+        ``.``, ``-`` or ``_``.
+
+        Note the pattern admits the literal ``"unknown"``, which is also what
+        ``BaseEvent.inject_metadata`` substitutes when metadata is omitted, so
+        a defaulted source cannot be told apart from a declared one.
+        """
+
         if not SOURCE_PATTERN.match(value):
             raise ValueError(
                 "source must match pattern [a-z0-9]+"

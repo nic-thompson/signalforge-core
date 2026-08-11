@@ -1,3 +1,9 @@
+"""
+Alert events and their acknowledgements.
+
+Importing this subpackage registers its schemas.
+"""
+
 from event_schema_contracts.alerts.alert_acknowledgement import (
     AlertAcknowledgementEvent,
     AlertAcknowledgementPayload,
