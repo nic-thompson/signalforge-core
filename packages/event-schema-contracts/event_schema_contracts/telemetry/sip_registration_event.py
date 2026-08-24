@@ -17,7 +17,11 @@ schema exists so the parser's actual output has a home. See
 docs/ADR-002-sip-registration-schema.md.
 
 Field naming deliberately diverges from the parser's internal names in
-three places, each noted inline below.
+two places, each noted inline below.
+
+Two fields the parser produces are deliberately absent — ``latency``
+and ``retry_count``. See ``SipRegistrationPayload`` below and the
+amendment in docs/ADR-002-sip-registration-schema.md.
 """
 
 from datetime import datetime
@@ -92,6 +96,32 @@ class SipRegistrationPayload(DomainEventPayload):
 
     One instance represents a single observed REGISTER transaction from
     one in-store device.
+
+    Two absent fields
+    -----------------
+    ``latency`` and ``retry_count`` are produced by ``telemetry-parser``
+    and deliberately not carried here. Both are unmappable for the same
+    structural reason: this parser reads REGISTER *requests* only, never
+    responses.
+
+    - ``latency`` comes from a non-standard ``X-Latency`` header. Its
+      unit is undocumented in every repository, and a request cannot
+      state its own round-trip time — that value does not exist when the
+      request is written. So whatever it measures happened earlier, and
+      naming it ``latency_ms`` asserted both a unit and a meaning that
+      nothing establishes. A seconds-valued figure would have passed a
+      millisecond range check silently and been wrong by 1000x with no
+      test able to catch it.
+    - ``retry_count`` comes from ``Retry-After``, a response header
+      (RFC 3261). A REGISTER request should not carry it, so on real
+      traffic the field is ``None`` on every event, permanently.
+
+    Both are omitted for the same reason ``RegistrationStatus`` declares
+    only ``REGISTERED``: a field no producer can correctly populate
+    describes a system that does not exist and invites consumers to
+    build on nothing. Reinstating either requires first establishing
+    what injects these headers at the edge and what they mean; adding an
+    optional field back is a minor bump, so nothing is foreclosed.
     """
 
     # device_id is UUIDv5, derived from (store_id, device_label) rather
@@ -146,23 +176,6 @@ class SipRegistrationPayload(DomainEventPayload):
             "capture time — never ingestion wall-clock, which would "
             "break replay determinism."
         ),
-    )
-
-    # Named latency_ms, not latency: the parser's field is a bare number
-    # with no unit in its name, and NetworkConnectionPayload already
-    # establishes latency_ms as the convention. Unnamed units are how a
-    # silent factor-of-1000 error gets in.
-    latency_ms: int | None = Field(
-        None,
-        ge=0,
-        le=60_000,
-        description="Observed registration latency in milliseconds.",
-    )
-
-    retry_count: int | None = Field(
-        None,
-        ge=0,
-        description="Retries before this registration attempt resolved.",
     )
 
     transport_protocol: SipTransportProtocol | None = Field(

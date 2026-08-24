@@ -42,8 +42,6 @@ def minimal_payload(**overrides):
 
 def test_minimal_payload_valid_with_only_required_fields():
     payload = minimal_payload()
-    assert payload.latency_ms is None
-    assert payload.retry_count is None
     assert payload.transport_protocol is None
     assert payload.source_ip is None
     assert payload.registration_call_id is None
@@ -152,20 +150,18 @@ def test_store_id_rejects_invalid_grammar(store_id):
 # ---------------------------------------------------------------
 
 
-def test_latency_ms_accepts_zero_and_upper_bound():
-    assert minimal_payload(latency_ms=0).latency_ms == 0
-    assert minimal_payload(latency_ms=60_000).latency_ms == 60_000
+# latency_ms and retry_count were removed from v1 before the schema had
+# any producer. These assert the removal is *enforced* rather than merely
+# absent: extra="forbid" means a producer still sending either field
+# fails loudly at the ingestion boundary instead of having it silently
+# dropped. Without these, someone could reinstate a field the parser
+# cannot correctly populate and no test would object.
 
 
-@pytest.mark.parametrize("latency", [-1, 60_001])
-def test_latency_ms_rejects_out_of_range(latency):
+@pytest.mark.parametrize("removed", ["latency_ms", "latency", "retry_count"])
+def test_removed_operational_fields_are_rejected(removed):
     with pytest.raises(ValidationError):
-        minimal_payload(latency_ms=latency)
-
-
-def test_retry_count_rejects_negative():
-    with pytest.raises(ValidationError):
-        minimal_payload(retry_count=-1)
+        minimal_payload(**{removed: 1})
 
 
 def test_source_ip_accepts_ipv4_and_ipv6():

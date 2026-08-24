@@ -33,7 +33,7 @@ Deriving from `store_id` means a device moving between stores acquires a new ide
 
 **Three fields are renamed from the parser's internal names**, each because the original invites a specific error:
 
-- `latency` → `latency_ms`. The parser's field is a bare number. `NetworkConnectionPayload` already establishes `latency_ms`. Unnamed units are how a factor-of-1000 error survives review.
+- ~~`latency` → `latency_ms`.~~ **Superseded — see Amendment 1.** The parser's field is a bare number. `NetworkConnectionPayload` already establishes `latency_ms`. Unnamed units are how a factor-of-1000 error survives review.
 - `call_id` → `registration_call_id`. On a REGISTER, SIP `Call-ID` identifies the registration transaction, not a voice call. The short name reads as call telemetry, which this is not.
 - `session_duration` dropped. No session exists at registration time; the field carries no meaning here.
 
@@ -64,3 +64,48 @@ This directly contradicts `BaseEvent`'s own documented rationale: *"an unrecogni
 `signal_forge.streaming.event_protocol` states that events reaching the streaming layer have *"already been validated by `telemetry-parser` against the schemas in `event-schema-contracts`"*, and skips re-validation on that basis. This is untrue: `telemetry-parser` does not import `event-schema-contracts` at all. No validation boundary currently exists anywhere in the pipeline.
 
 The planned ingestion Lambda should become that boundary, which makes the claim true rather than aspirational. Until it exists, `signal-forge`'s decision to skip validation rests on a guarantee nothing provides.
+
+---
+
+# Amendment 1: remove `latency_ms` and `retry_count` from v1
+
+- **Date:** 2026-08-24
+- **Status:** Accepted
+- **Amends:** the Decision section above, before any producer existed
+
+## Context
+
+Wiring the ingestion path required mapping `telemetry-parser`'s output field by field onto this schema for the first time. That exercise showed two fields cannot be correctly populated by the producer they were designed for.
+
+Both fail for the same structural reason: **the parser reads REGISTER requests only, never responses.**
+
+**`latency_ms`.** The source is `X-Latency`, a non-standard header. Its unit is undocumented in `telemetry-parser`, in this library, and in `aws-event-pipeline-infra` — the only definition anywhere is one line of `docs/event-mapping.md` stating that the header maps to `payload.latency`.
+
+The original decision renamed it to `latency_ms` to avoid a unit-less field. That was the right instinct applied to the wrong problem: the field was not unit-less by oversight, it was unit-*unknown*, and the rename resolved the ambiguity by assertion rather than by evidence. Had the header carried seconds, every value would have passed the `0..60_000` range check and been wrong by three orders of magnitude, with no test capable of detecting it — the exact failure the rename was meant to prevent.
+
+There is a second problem the rename did not address. A request cannot state its own round-trip time; that value does not exist at the moment the request is written. So `X-Latency` on a REGISTER necessarily describes something that already happened — a prior registration cycle, or a separately measured path latency. The field's description, "Observed registration latency", was therefore wrong about *what* it measured independently of the unit question.
+
+**`retry_count`.** The source is `Retry-After`, which RFC 3261 defines as a response header. A REGISTER request should not carry it. On real traffic the field would be `None` on every event, permanently.
+
+## Decision
+
+Remove both fields from `sip.registration v1`.
+
+The precedent is `RegistrationStatus` in the original decision, which declares only `REGISTERED` because declaring values no producer can emit describes a parser that does not exist and invites dead branches in consumers. A field no producer can correctly populate is the same error expressed as a field rather than an enum value.
+
+`extra="forbid"` on `DomainEventPayload` makes the removal enforced rather than cosmetic: a producer still sending either field now fails at the ingestion boundary instead of having it silently dropped. Tests assert this directly.
+
+## On amending v1 rather than bumping the major version
+
+`docs/compatibility-policy.md` lists field removal as requiring a major version bump. That rule is not being bent, because its premise does not hold here: `sip.registration v1` was added two days ago, has no producers, no consumers, and no persisted events. There is nothing to be backward compatible *with*.
+
+This is the same reasoning `aws-event-pipeline-infra` ADR-001 used to justify destroying and recreating the EventBridge Archive — acceptable only while the pipeline has never carried real data, and unacceptable the moment it has.
+
+That window is closing. Once the ingestion Lambda ships and events reach the archive, amending v1 stops being free and this removal would require `v2` plus the deprecation lifecycle. Recording the amendment explicitly, rather than quietly editing the schema, is what keeps the policy meaningful.
+
+## Consequences
+
+- The ingestion Lambda maps neither field. It cannot silently guess a unit, because there is no field to guess into.
+- Reinstating either field is a minor bump (optional field addition), so nothing is foreclosed. What it requires first is establishing what injects these headers at the edge and what they mean.
+- **That question now blocks something more important than a field mapping.** `X-Latency`, `X-Session-Duration` and `Retry-After` are not the only non-standard headers this parser consumes — `X-Timestamp` is one too, and `observed_at` is sourced from it. If nothing at the edge injects these headers, then `observed_at` falls back to ingestion wall-clock on every event, and the replay-determinism property this platform is built around has no foundation at the edge layer at all. Establishing the injector is the next piece of work.
+- Test count moves from 224 to 223: four tests removed, three added.
