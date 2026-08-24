@@ -92,11 +92,21 @@ class EventNormaliser:
         self,
         extracted: ExtractedEventFields,
     ) -> str:
+        """
+        "device.registration" was the identity already registered by
+        event-schema-contracts for device *provisioning* (device_type,
+        firmware_version) — a different domain with an incompatible
+        field set from what this parser actually extracts. Emitting
+        that identity meant every event from this parser was
+        unvalidatable against any schema it could actually satisfy.
+        "sip.registration" is the schema built for this parser's real
+        output. See event-schema-contracts ADR-002.
+        """
 
         if extracted.registration_status == "registered":
-            return "device.registration"
+            return "sip.registration"
 
-        return "device.unknown"
+        return "sip.unknown"
 
     def _build_payload(
         self,

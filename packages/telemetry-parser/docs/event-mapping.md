@@ -16,11 +16,11 @@ REGISTER
 
 Maps to:
 
-device.registration
+sip.registration
 
 Unsupported methods map to:
 
-device.unknown
+sip.unknown
 
 ---
 
@@ -104,7 +104,7 @@ Example structured event:
 
 {
   "schema_version": "v1",
-  "event_type": "device.registration",
+  "event_type": "sip.registration",
   "payload": {
     "device_id": "handset-42",
     "transport_protocol": "TCP",

@@ -38,7 +38,7 @@ def make_structured_event() -> StructuredEvent:
         trace_id="trace-1",
         event_timestamp=datetime.now(timezone.utc),
         ingest_timestamp=datetime.now(timezone.utc),
-        event_type="device.registration",
+        event_type="sip.registration",
         source="test",
         payload={},
     )
