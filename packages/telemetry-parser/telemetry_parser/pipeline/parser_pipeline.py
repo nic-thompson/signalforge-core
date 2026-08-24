@@ -80,7 +80,7 @@ class ParserPipeline:
 
                 for framed_message in self.decoder.feed(chunk):
 
-                    sip_message = self.parser.parse(framed_message)
+                    sip_message = self.parser.parse(framed_message.data)
 
                     if sip_message is None:
                         continue
@@ -96,6 +96,7 @@ class ParserPipeline:
                     structured_event = self.normaliser.normalise(
                         extracted,
                         trace_id=trace_id,
+                        observed_at=framed_message.timestamp,
                     )
 
                     yield self.emitter.emit(structured_event)
@@ -122,7 +123,7 @@ class ParserPipeline:
 
             for framed_message in self.decoder.feed(chunk):
 
-                sip_message = self.parser.parse(framed_message)
+                sip_message = self.parser.parse(framed_message.data)
 
                 if sip_message is None:
                     continue
@@ -138,6 +139,7 @@ class ParserPipeline:
                 structured_event = self.normaliser.normalise(
                     extracted,
                     trace_id=trace_id,
+                    observed_at=framed_message.timestamp,
                 )
 
                 yield self.emitter.emit(structured_event)
@@ -145,10 +147,10 @@ class ParserPipeline:
         # Flush decoder remainder
         remainder = self.decoder.flush()
 
-        if not remainder:
+        if remainder is None:
             return
 
-        sip_message = self.parser.parse(remainder)
+        sip_message = self.parser.parse(remainder.data)
 
         if sip_message is None:
             return
@@ -164,6 +166,7 @@ class ParserPipeline:
         structured_event = self.normaliser.normalise(
             extracted,
             trace_id=trace_id,
+            observed_at=remainder.timestamp,
         )
 
         yield self.emitter.emit(structured_event)

@@ -5,6 +5,14 @@ from telemetry_parser.stream.tcp_reassembler import (
     TCPReassembler,
 )
 
+
+def payloads(chunks) -> list[bytes]:
+    return [chunk.data for chunk in chunks]
+
+
+def timestamps(chunks) -> list[datetime]:
+    return [chunk.timestamp for chunk in chunks]
+
 def make_packet(
     seq: int,
     payload: bytes,
@@ -36,7 +44,8 @@ def test_in_order_packet_delivery():
 
     output = list(r.process_packet(pkt))
 
-    assert output == [b"hello"]
+    assert payloads(output) == [b"hello"]
+    assert timestamps(output) == [ts]
 
 
 def test_initial_sequence_number_is_respected():
@@ -47,7 +56,7 @@ def test_initial_sequence_number_is_respected():
 
     output = list(r.process_packet(pkt))
 
-    assert output == [b"abc"]
+    assert payloads(output) == [b"abc"]
 
 
 def test_out_of_order_packet_buffering_then_flush():
@@ -62,9 +71,18 @@ def test_out_of_order_packet_buffering_then_flush():
     out2 = list(r.process_packet(pkt2)) # buffered
     out3 = list(r.process_packet(pkt_mid)) # resolved gap
 
-    assert out1 == [b"hello"]
+    assert payloads(out1) == [b"hello"]
     assert out2 == []
-    assert out3 == [b"12345", b"world"]
+    assert payloads(out3) == [b"12345", b"world"]
+
+    # "world" was buffered when it arrived at +1s and released at +2s.
+    # It keeps its own arrival time, not the time of the packet that
+    # unblocked it — otherwise a gap in the stream would silently move
+    # observation times forward.
+    assert timestamps(out3) == [
+        ts + timedelta(seconds=2),
+        ts + timedelta(seconds=1),
+    ]
 
 
 def test_duplicate_packet_is_ignored():
@@ -76,7 +94,7 @@ def test_duplicate_packet_is_ignored():
     first = list(r.process_packet(pkt))
     second = list(r.process_packet(pkt))
 
-    assert first == [b"hello"]
+    assert payloads(first) == [b"hello"]
     assert second == []
 
 
@@ -103,9 +121,16 @@ def test_buffered_packets_flush_in_order():
     out2 = list(r.process_packet(pkt3)) # buffered
     out3 = list(r.process_packet(pkt2)) # resolves gap
 
-    assert out1 == [b"A"]
+    assert payloads(out1) == [b"A"]
     assert out2 == []
-    assert out3 == [b"B", b"C"]
+    assert payloads(out3) == [b"B", b"C"]
+
+    # C arrived before B but is released after it; each keeps its own
+    # observation time, so the released order is not time-ordered.
+    assert timestamps(out3) == [
+        ts + timedelta(seconds=2),
+        ts + timedelta(seconds=1),
+    ]
 
 
 def test_fin_close_session():
@@ -136,7 +161,9 @@ def test_flush_session_returns_remaining_buffer():
 
     flushed = r.flush_session(session)
 
-    assert flushed == b"C"
+    assert flushed is not None
+    assert flushed.data == b"C"
+    assert flushed.timestamp == ts + timedelta(seconds=1)
     assert session.buffered_segments == {}
 
 

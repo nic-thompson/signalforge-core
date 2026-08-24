@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Dict, Iterable, Tuple
 
 from telemetry_parser.observability.parser_observer import ParserObserver
+from telemetry_parser.stream.observation import TimestampedChunk
 
 SessionKey = Tuple[str, int, str, int]
 
@@ -18,7 +19,10 @@ class TCPSession:
     end_timestamp: datetime | None = None
 
     expected_sequence: int = 0
-    buffered_segments: Dict[int, bytes] = field(default_factory=dict)
+    # Out-of-order segments retain the observation time of the packet they
+    # arrived in. Storing bare bytes here discarded it, so a segment held
+    # behind a gap was released with no record of when it was seen.
+    buffered_segments: Dict[int, TimestampedChunk] = field(default_factory=dict)
 
     def update_activity(self, timestamp: datetime) -> None:
         self.last_activity_timestamp = timestamp

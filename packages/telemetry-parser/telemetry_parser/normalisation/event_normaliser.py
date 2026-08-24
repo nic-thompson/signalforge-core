@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Dict, Any
 
 from telemetry_parser.extraction.field_mapper import ExtractedEventFields
@@ -45,10 +46,21 @@ class EventNormaliser:
         self,
         extracted: ExtractedEventFields,
         trace_id: str | None = None,
+        observed_at: datetime | None = None,
     ) -> StructuredEvent:
+        """
+        Parameters
+        ----------
+        observed_at:
+            Packet capture time for the message this event came from — the
+            timestamp of the packet carrying its first byte. Used as the
+            event time when the message itself supplies none, in place of
+            ingestion wall-clock, which is not reproducible on replay.
+        """
 
         event_timestamp = TimestampUtils.normalise_event_timestamp(
-            extracted.event_timestamp
+            extracted.event_timestamp,
+            fallback_timestamp=observed_at,
         )
 
         ingest_timestamp = (

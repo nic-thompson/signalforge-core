@@ -4,6 +4,7 @@ from typing import Iterator
 
 from telemetry_parser.stream.session_tracker import SessionTracker, TCPSession
 from telemetry_parser.observability.parser_observer import ParserObserver
+from telemetry_parser.stream.observation import TimestampedChunk
 
 @dataclass
 class TCPPacket:
@@ -44,7 +45,7 @@ class TCPReassembler:
     def process_packet(
         self,
         packet: TCPPacket,
-    ) -> Iterator[bytes]:
+    ) -> Iterator[TimestampedChunk]:
 
         session = self.session_tracker.get_or_create_session(
             packet.src_ip,
@@ -69,7 +70,7 @@ class TCPReassembler:
         self,
         session: TCPSession,
         packet: TCPPacket,
-    ) -> Iterator[bytes]:
+    ) -> Iterator[TimestampedChunk]:
 
         seq = packet.sequence_number
 
@@ -87,13 +88,19 @@ class TCPReassembler:
             return
 
         if seq > session.expected_sequence:
-            session.buffered_segments[seq] = packet.payload
+            session.buffered_segments[seq] = TimestampedChunk(
+                timestamp=packet.timestamp,
+                data=packet.payload,
+            )
             return
 
         if not packet.payload:
             return
 
-        yield packet.payload
+        yield TimestampedChunk(
+            timestamp=packet.timestamp,
+            data=packet.payload,
+        )
 
         session.expected_sequence += len(packet.payload)
 
@@ -103,20 +110,25 @@ class TCPReassembler:
     def _flush_buffer(
             self,
             session: TCPSession,
-    ) -> Iterator[bytes]:
-        
+    ) -> Iterator[TimestampedChunk]:
+        """
+        Releases buffered segments that the newly arrived packet has
+        made contiguous. Each keeps the observation time of the packet
+        it arrived in, not the time of the packet that unblocked it.
+        """
+
         while session.expected_sequence in session.buffered_segments:
 
-            payload = session.buffered_segments.pop(
+            chunk = session.buffered_segments.pop(
                 session.expected_sequence
             )
 
-            yield payload
+            yield chunk
 
-            session.expected_sequence += len(payload)
+            session.expected_sequence += len(chunk.data)
 
 
-    def flush(self) -> Iterator[bytes]:
+    def flush(self) -> Iterator[TimestampedChunk]:
         """
         Flushes all remaining out-of-order buffered payloads across every
         tracked session. Called by the pipeline at end-of-stream to ensure
@@ -131,22 +143,28 @@ class TCPReassembler:
     def flush_session(
             self,
             session: TCPSession,
-    ) -> bytes | None:
+    ) -> TimestampedChunk | None:
         """
         Flushes any remaining out-of-order buffered payload when session
         terminates or capture ends.
+
+        Note that this joins segments across a gap that was never filled,
+        so the result is not a contiguous stream. The timestamp is that of
+        the lowest-sequence segment held, per the first-byte rule.
         """
-        
+
         if not session.buffered_segments:
             return None
-        
+
         ordered_sequences = sorted(session.buffered_segments.keys())
 
         data = b"".join(
-            session.buffered_segments[seq]
+            session.buffered_segments[seq].data
             for seq in ordered_sequences
         )
 
+        timestamp = session.buffered_segments[ordered_sequences[0]].timestamp
+
         session.buffered_segments.clear()
 
-        return data
+        return TimestampedChunk(timestamp=timestamp, data=data)
