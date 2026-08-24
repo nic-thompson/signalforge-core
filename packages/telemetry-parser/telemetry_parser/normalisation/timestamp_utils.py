@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-from typing import Optional 
 
 class TimestampUtils:
     """
@@ -13,22 +12,19 @@ class TimestampUtils:
 
     @staticmethod
     def normalise_event_timestamp(
-        extracted_timestamp: datetime | None,
-        fallback_timestamp: datetime | None = None,
+        observed_at: datetime,
     ) -> datetime:
         """
-        Uses extracted timestamp if present,
-        otherwise falls back to provided timestamp,
-        otherwise uses current UTC time.
+        Returns the observation time in UTC.
+
+        This used to walk a fallback chain ending at datetime.now(), which
+        meant an event with no timestamp of its own was dated by when it
+        happened to be processed — different on every run, so replay could
+        not reproduce anything. Observation time is now the only source and
+        is always supplied, so there is no chain and no clock read.
         """
 
-        if extracted_timestamp is not None:
-            return TimestampUtils._ensure_utc(extracted_timestamp)
-        
-        if fallback_timestamp is not None:
-            return TimestampUtils._ensure_utc(fallback_timestamp)
-        
-        return datetime.now(timezone.utc)
+        return TimestampUtils._ensure_utc(observed_at)
     
 
     @staticmethod

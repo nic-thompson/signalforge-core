@@ -1,23 +1,28 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from telemetry_parser.extraction.field_mapper import ExtractedEventFields
 from telemetry_parser.normalisation.event_normaliser import EventNormaliser
+
+
+OBSERVED_AT = datetime(2026, 8, 24, 9, 30, 0, tzinfo=timezone.utc)
 
 
 def make_extracted(**overrides) -> ExtractedEventFields:
     fields = {
         "device_id": "headset-0001",
         "registration_status": "registered",
-        "latency": 42.5,
-        "retry_count": 0,
         "transport_protocol": "TCP",
-        "session_duration": None,
         "call_id": "c8f3a91e",
         "source_ip": "10.20.0.14",
-        "event_timestamp": datetime.now(timezone.utc),
     }
     fields.update(overrides)
     return ExtractedEventFields(**fields)
+
+
+def normalise(normaliser: EventNormaliser, extracted, **kwargs):
+    return normaliser.normalise(extracted, observed_at=OBSERVED_AT, **kwargs)
 
 
 # ---------------------------------------------------------------
@@ -35,7 +40,7 @@ def test_registered_status_maps_to_sip_registration():
     normaliser = EventNormaliser()
     extracted = make_extracted(registration_status="registered")
 
-    event = normaliser.normalise(extracted)
+    event = normalise(normaliser, extracted)
 
     assert event.event_type == "sip.registration"
 
@@ -50,7 +55,7 @@ def test_missing_registration_status_maps_to_sip_unknown():
     normaliser = EventNormaliser()
     extracted = make_extracted(registration_status=None)
 
-    event = normaliser.normalise(extracted)
+    event = normalise(normaliser, extracted)
 
     assert event.event_type == "sip.unknown"
 
@@ -64,8 +69,37 @@ def test_event_type_never_uses_device_prefix():
     """
     normaliser = EventNormaliser()
 
-    registered = normaliser.normalise(make_extracted(registration_status="registered"))
-    unknown = normaliser.normalise(make_extracted(registration_status=None))
+    registered = normalise(normaliser, make_extracted(registration_status="registered"))
+    unknown = normalise(normaliser, make_extracted(registration_status=None))
 
     assert not registered.event_type.startswith("device.")
     assert not unknown.event_type.startswith("device.")
+
+
+# ---------------------------------------------------------------
+# observation time is the only source of event time
+# ---------------------------------------------------------------
+
+
+def test_event_time_is_the_observation_time():
+    event = normalise(EventNormaliser(), make_extracted())
+
+    assert event.event_timestamp == OBSERVED_AT
+
+
+def test_observation_time_is_required():
+    """
+    Devices send plain RFC 3261, which carries no timestamp, so there is
+    nothing to fall back from. Omitting observation time is a programming
+    error, not a case to paper over with the clock.
+    """
+
+    with pytest.raises(TypeError):
+        EventNormaliser().normalise(make_extracted())
+
+
+def test_payload_carries_no_removed_fields():
+    payload = normalise(EventNormaliser(), make_extracted()).payload
+
+    for removed in ("latency", "retry_count", "session_duration"):
+        assert removed not in payload

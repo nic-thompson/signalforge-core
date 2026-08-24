@@ -147,36 +147,47 @@ def test_fin_close_session():
     assert sessions[0].end_timestamp == ts
 
 
-def test_flush_session_returns_remaining_buffer():
+def test_discard_incomplete_drops_and_counts_stranded_segments():
+    """
+    A segment sitting behind a gap that never filled is dropped, not
+    released. It is not contiguous with anything, so there is no honest
+    way to frame it — but the count must survive so a lossy capture is
+    visible rather than silent.
+    """
+
     r = TCPReassembler()
     ts = datetime.now(timezone.utc)
 
-    pkt1 = make_packet(1000, b"A", ts)
-    pkt_gap = make_packet(1002, b"C", ts + timedelta(seconds=1)) 
-
-    list(r.process_packet(pkt1))
-    list(r.process_packet(pkt_gap)) # buffered
+    list(r.process_packet(make_packet(1000, b"A", ts)))
+    list(r.process_packet(make_packet(1002, b"CC", ts + timedelta(seconds=1))))
 
     session = next(iter(r.session_tracker.sessions.values()))
+    assert session.buffered_segments != {}
 
-    flushed = r.flush_session(session)
+    segments, discarded_bytes = r.discard_incomplete()
 
-    assert flushed is not None
-    assert flushed.data == b"C"
-    assert flushed.timestamp == ts + timedelta(seconds=1)
+    assert segments == 1
+    assert discarded_bytes == 2
     assert session.buffered_segments == {}
 
 
-def test_flush_session_returns_none_when_empty():
+def test_discard_incomplete_reports_nothing_when_stream_is_clean():
     r = TCPReassembler()
     ts = datetime.now(timezone.utc)
 
-    pkt = make_packet(1000, b"A", ts)
+    list(r.process_packet(make_packet(1000, b"A", ts)))
 
-    list(r.process_packet(pkt))
+    assert r.discard_incomplete() == (0, 0)
 
-    session = next(iter(r.session_tracker.sessions.values()))
 
-    flushed = r.flush_session(session)
+def test_flush_paths_that_fabricated_contiguity_are_gone():
+    """
+    flush() and flush_session() joined segments across a gap and handed
+    the result on to be parsed. Both are removed (ADR-001); these assert
+    they stay removed.
+    """
 
-    assert flushed is None
+    r = TCPReassembler()
+
+    assert not hasattr(r, "flush")
+    assert not hasattr(r, "flush_session")

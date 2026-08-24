@@ -95,78 +95,54 @@ class ParserPipeline:
 
                     structured_event = self.normaliser.normalise(
                         extracted,
-                        trace_id=trace_id,
                         observed_at=framed_message.timestamp,
+                        trace_id=trace_id,
                     )
 
                     yield self.emitter.emit(structured_event)
 
         # Ensure deterministic termination behaviour
-        yield from self._flush_buffers(trace_id)
+        self._discard_incomplete_buffers()
 
-    def _flush_buffers(
-        self,
-        trace_id: str | None = None,
-    ) -> Iterator[StructuredEvent]:
+    def _discard_incomplete_buffers(self) -> None:
         """
-        Flushes buffered state from the TCP reassembler and message decoder.
+        Discards whatever remains buffered at end-of-stream, and reports
+        it to the observer. Emits nothing.
 
-        Required for:
+        This method used to parse the leftovers and emit events from them.
+        Both sources were unsound. The reassembler held segments stranded
+        behind gaps that never filled, so joining them produced bytes that
+        were never contiguous on the wire. The decoder held a fragment with
+        no header terminator, which is by definition an incomplete SIP
+        message. Events built from either were indistinguishable downstream
+        from events built from clean captures.
 
-        - deterministic replay completion
-        - SIP frame boundary correctness
-        - offline PCAP dataset regeneration
+        Dropping them silently would be no better, so what was discarded is
+        reported instead: the count is a signal that a capture was lossy,
+        which is worth knowing and was previously hidden inside plausible
+        looking events.
+
+        See docs/ADR-001-edge-producer-contract.md.
         """
 
-        # Flush TCP reassembly buffers first
-        for chunk in self.reassembler.flush():
+        segments, segment_bytes = self.reassembler.discard_incomplete()
 
-            for framed_message in self.decoder.feed(chunk):
+        if segments and self.observer:
+            self.observer.on_packet_dropped(
+                "incomplete_reassembly_at_end_of_stream",
+                {
+                    "segments": segments,
+                    "bytes": segment_bytes,
+                },
+            )
 
-                sip_message = self.parser.parse(framed_message.data)
-
-                if sip_message is None:
-                    continue
-
-                try:
-                    extracted = self.extractor.extract(sip_message)
-                except UnsupportedProtocolEvent:
-                    continue
-
-                if extracted is None:
-                    continue
-
-                structured_event = self.normaliser.normalise(
-                    extracted,
-                    trace_id=trace_id,
-                    observed_at=framed_message.timestamp,
-                )
-
-                yield self.emitter.emit(structured_event)
-
-        # Flush decoder remainder
         remainder = self.decoder.flush()
 
-        if remainder is None:
-            return
-
-        sip_message = self.parser.parse(remainder.data)
-
-        if sip_message is None:
-            return
-
-        try:
-            extracted = self.extractor.extract(sip_message)
-        except UnsupportedProtocolEvent:
-            return
-
-        if extracted is None:
-            return
-
-        structured_event = self.normaliser.normalise(
-            extracted,
-            trace_id=trace_id,
-            observed_at=remainder.timestamp,
-        )
-
-        yield self.emitter.emit(structured_event)
+        if remainder is not None and self.observer:
+            self.observer.on_packet_dropped(
+                "incomplete_message_at_end_of_stream",
+                {
+                    "bytes": len(remainder.data),
+                    "observed_at": remainder.timestamp.isoformat(),
+                },
+            )

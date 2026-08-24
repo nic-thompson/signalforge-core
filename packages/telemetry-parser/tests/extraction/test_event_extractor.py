@@ -1,5 +1,4 @@
 import pytest
-from datetime import datetime, timezone
 
 from telemetry_parser.protocol.sip_parser import SIPMessage
 from telemetry_parser.extraction.event_extractor import (
@@ -87,45 +86,28 @@ def test_extract_maps_registration_status(extractor):
     assert result.registration_status == "registered"
 
 
-def test_extract_maps_latency(extractor):
-    msg = make_register_message(headers={"cseq": "1 REGISTER", "x-latency": "25.5"})
+def test_non_standard_headers_are_ignored(extractor):
+    """
+    A message carrying the old X- headers extracts exactly as one without
+    them. Nothing reads them any more, so their presence changes nothing.
+    """
 
-    result = extractor.extract(msg)
+    plain = extractor.extract(make_register_message())
 
-    assert result.latency == 25.5
-
-
-def test_extract_maps_retry_count(extractor):
-    msg = make_register_message(headers={"cseq": "1 REGISTER", "retry-after": "3"})
-
-    result = extractor.extract(msg)
-
-    assert result.retry_count == 3
-
-
-def test_extract_maps_session_duration(extractor):
-    msg = make_register_message(
-        headers={"cseq": "1 REGISTER", "x-session-duration": "120.0"}
+    annotated = extractor.extract(
+        make_register_message(
+            headers={
+                "cseq": "1 REGISTER",
+                "x-latency": "25.5",
+                "x-session-duration": "120.0",
+                "x-timestamp": "2026-04-20T10:15:30Z",
+                "retry-after": "3",
+            }
+        )
     )
 
-    result = extractor.extract(msg)
+    assert plain == annotated
 
-    assert result.session_duration == 120.0
-
-
-def test_extract_maps_event_timestamp(extractor):
-    msg = make_register_message(
-        headers={"cseq": "1 REGISTER", "x-timestamp": "2026-04-20T10:15:30Z"}
-    )
-
-    result = extractor.extract(msg)
-
-    assert result.event_timestamp == datetime(2026, 4, 20, 10, 15, 30, tzinfo=timezone.utc)
-
-
-# ----------------------------------------------------------------
-# missing / null fields
-# ----------------------------------------------------------------
 
 def test_extract_with_no_optional_headers_returns_none_fields(extractor):
     msg = make_register_message(
@@ -143,10 +125,6 @@ def test_extract_with_no_optional_headers_returns_none_fields(extractor):
     assert result.transport_protocol is None
     assert result.source_ip is None
     assert result.registration_status is None
-    assert result.latency is None
-    assert result.retry_count is None
-    assert result.session_duration is None
-    assert result.event_timestamp is None
 
 
 # ----------------------------------------------------------------

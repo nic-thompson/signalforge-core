@@ -128,43 +128,30 @@ class TCPReassembler:
             session.expected_sequence += len(chunk.data)
 
 
-    def flush(self) -> Iterator[TimestampedChunk]:
+    def discard_incomplete(self) -> tuple[int, int]:
         """
-        Flushes all remaining out-of-order buffered payloads across every
-        tracked session. Called by the pipeline at end-of-stream to ensure
-        deterministic termination.
-        """
+        Drops out-of-order segments still held behind gaps that never
+        filled, and reports how much was dropped as (segments, bytes).
 
-        for session in list(self.session_tracker.sessions.values()):
-            data = self.flush_session(session)
-            if data:
-                yield data
+        These segments are not a stream. Each sits after a hole in the
+        sequence space, so joining them would fabricate contiguity that
+        was never observed — which is what the previous flush() did before
+        handing the result on to be parsed and emitted. Bytes across a gap
+        cannot be framed into a SIP message honestly, so they are
+        discarded and counted rather than reconstructed.
 
-    def flush_session(
-            self,
-            session: TCPSession,
-    ) -> TimestampedChunk | None:
-        """
-        Flushes any remaining out-of-order buffered payload when session
-        terminates or capture ends.
-
-        Note that this joins segments across a gap that was never filled,
-        so the result is not a contiguous stream. The timestamp is that of
-        the lowest-sequence segment held, per the first-byte rule.
+        See docs/ADR-001-edge-producer-contract.md.
         """
 
-        if not session.buffered_segments:
-            return None
+        segments = 0
+        discarded_bytes = 0
 
-        ordered_sequences = sorted(session.buffered_segments.keys())
+        for session in self.session_tracker.sessions.values():
 
-        data = b"".join(
-            session.buffered_segments[seq].data
-            for seq in ordered_sequences
-        )
+            for chunk in session.buffered_segments.values():
+                segments += 1
+                discarded_bytes += len(chunk.data)
 
-        timestamp = session.buffered_segments[ordered_sequences[0]].timestamp
+            session.buffered_segments.clear()
 
-        session.buffered_segments.clear()
-
-        return TimestampedChunk(timestamp=timestamp, data=data)
+        return segments, discarded_bytes

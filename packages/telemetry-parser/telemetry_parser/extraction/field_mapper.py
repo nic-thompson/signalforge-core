@@ -1,19 +1,25 @@
 from dataclasses import dataclass
 from typing import Dict, Literal
-from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
 class ExtractedEventFields:
+    """
+    Telemetry attributes taken from a SIP REGISTER.
+
+    Every field here comes from a standard RFC 3261 header. Four fields
+    were removed when the edge producer contract was written: latency,
+    retry_count and session_duration read non-standard X- headers that no
+    device sends and no document defines, and event_timestamp read
+    X-Timestamp, which observation time replaced. See
+    docs/ADR-001-edge-producer-contract.md.
+    """
+
     device_id: str | None
     registration_status: Literal["registered"] | None
-    latency: float | None
-    retry_count: int | None
     transport_protocol: str | None
-    session_duration: float | None
     call_id: str | None
     source_ip: str | None
-    event_timestamp: datetime | None
 
 
 class FieldMapper:
@@ -30,77 +36,13 @@ class FieldMapper:
         self,
         headers: Dict[str, str],
     ) -> Literal["registered"] | None:
-        
+
         cseq = headers.get("cseq")
 
         if not cseq:
             return None
-        
+
         if "REGISTER" in cseq:
             return "registered"
 
         return None
-    
-    def map_retry_count(
-        self,
-        headers: Dict[str, str],
-    ) -> int | None:
-        
-        retry_header = headers.get("retry-after")
-
-        if retry_header is None:
-            return None
-        
-        try:
-            return int(retry_header)
-        except ValueError:
-            return None
-        
-    def map_latency(
-        self,
-        headers: Dict[str, str],
-    ) -> float | None:
-        
-        latency_header = headers.get("x-latency")
-
-        if latency_header is None:
-            return None
-        
-        try: 
-            return float(latency_header)
-        except ValueError:
-            return None
-        
-    
-    def map_session_duration(
-        self,
-        headers: Dict[str, str],
-    ) -> float | None:
-        
-        duration_header = headers.get("x-session-duration")
-
-        if duration_header is None:
-            return None
-        
-        try:
-            return float(duration_header)
-        except ValueError:
-            return None
-        
-    
-    def map_timestamp(
-        self,
-        headers: Dict[str, str],
-    ) -> datetime | None:
-        
-        ts = headers.get("x-timestamp")
-
-        if ts is None:
-            return None
-        
-        try:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-            return dt.astimezone(timezone.utc)
-        except Exception:
-            return None
-        

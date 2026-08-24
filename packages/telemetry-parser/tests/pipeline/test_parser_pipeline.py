@@ -84,7 +84,7 @@ def test_parse_stream_single_event(pipeline):
     pipeline.normaliser.normalise.return_value = structured
     pipeline.emitter.emit.return_value = structured
 
-    pipeline.reassembler.flush.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
     pipeline.decoder.flush.return_value = None
 
     events = list(pipeline.parse_stream([packet]))
@@ -97,7 +97,7 @@ def test_parse_stream_skips_none_sip_messages(pipeline):
     pipeline.decoder.feed.return_value = [framed()]
     pipeline.parser.parse.return_value = None
 
-    pipeline.reassembler.flush.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
     pipeline.decoder.flush.return_value = None
 
     events = list(pipeline.parse_stream([DummyPacket()]))
@@ -111,7 +111,7 @@ def test_parse_stream_skips_none_extracted(pipeline):
     pipeline.parser.parse.return_value = DummySIPMessage()
     pipeline.extractor.extract.return_value = None
 
-    pipeline.reassembler.flush.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
     pipeline.decoder.flush.return_value = None
 
     events = list(pipeline.parse_stream([DummyPacket()]))
@@ -132,54 +132,16 @@ def test_trace_id_propagated_to_normaliser(pipeline):
     pipeline.normaliser.normalise.return_value = structured
     pipeline.emitter.emit.return_value = structured
 
-    pipeline.reassembler.flush.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
     pipeline.decoder.flush.return_value = None
 
     list(pipeline.parse_stream([DummyPacket()], trace_id="trace-123"))
 
     pipeline.normaliser.normalise.assert_called_with(
         extracted,
-        trace_id="trace-123",
         observed_at=BASE_TIME,
+        trace_id="trace-123",
     )
-
-
-def test_decoder_flush_emits_remaining_message(pipeline):
-    structured = make_structured_event()
-
-    pipeline.reassembler.process_packet.return_value = []
-    pipeline.reassembler.flush.return_value = []
-
-    pipeline.decoder.flush.return_value = framed(b"remainder")
-
-    pipeline.parser.parse.return_value = DummySIPMessage()
-    pipeline.extractor.extract.return_value = DummyExtracted()
-    pipeline.normaliser.normalise.return_value = structured
-    pipeline.emitter.emit.return_value = structured
-
-    events = list(pipeline.parse_stream([]))
-
-    assert events == [structured]
-
-
-def test_reassembler_flush_processed(pipeline):
-    chunk = "chunk"
-    structured = make_structured_event()
-
-    pipeline.reassembler.process_packet.return_value = []
-    pipeline.reassembler.flush.return_value = [chunk]
-
-    pipeline.decoder.feed.return_value = [framed()]
-    pipeline.decoder.flush.return_value = None
-
-    pipeline.parser.parse.return_value = DummySIPMessage()
-    pipeline.extractor.extract.return_value = DummyExtracted()
-    pipeline.normaliser.normalise.return_value = structured
-    pipeline.emitter.emit.return_value = structured
-
-    events = list(pipeline.parse_stream([]))
-
-    assert events == [structured]
 
 
 def test_multiple_packets_processed_in_order(pipeline):
@@ -204,7 +166,7 @@ def test_multiple_packets_processed_in_order(pipeline):
     pipeline.normaliser.normalise.side_effect = [event1, event2]
     pipeline.emitter.emit.side_effect = [event1, event2]
 
-    pipeline.reassembler.flush.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
     pipeline.decoder.flush.return_value = None
 
     events = list(pipeline.parse_stream(packets))
@@ -223,7 +185,7 @@ def test_emitter_called_once_per_event(pipeline):
     pipeline.normaliser.normalise.return_value = structured
     pipeline.emitter.emit.return_value = structured
 
-    pipeline.reassembler.flush.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
     pipeline.decoder.flush.return_value = None
 
     list(pipeline.parse_stream([DummyPacket()]))
@@ -231,30 +193,93 @@ def test_emitter_called_once_per_event(pipeline):
     pipeline.emitter.emit.assert_called_once_with(structured)
 
 
-def test_no_packets_still_flushes_buffers(pipeline):
-    structured = make_structured_event()
+# ---------------------------------------------------------------
+# End-of-stream leftovers are discarded, not emitted
+# ---------------------------------------------------------------
 
+# These previously asserted the opposite: that a decoder remainder and
+# stranded reassembly segments were parsed and emitted as events. Both
+# sources were unsound — a remainder has no header terminator, and
+# stranded segments sit behind a gap that never filled — so the events
+# they produced were fabricated but indistinguishable downstream from
+# real ones. ADR-001 refuses them.
+
+
+def test_decoder_remainder_is_not_emitted(pipeline):
     pipeline.reassembler.process_packet.return_value = []
-    pipeline.reassembler.flush.return_value = []
-
-    pipeline.decoder.flush.return_value = framed(b"remainder")
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
+    pipeline.decoder.flush.return_value = framed(b"truncated")
 
     pipeline.parser.parse.return_value = DummySIPMessage()
     pipeline.extractor.extract.return_value = DummyExtracted()
-    pipeline.normaliser.normalise.return_value = structured
-    pipeline.emitter.emit.return_value = structured
-
-    events = list(pipeline.parse_stream([]))
-
-    assert events == [structured]
-
-
-def test_none_decoder_flush_produces_no_event(pipeline):
-    pipeline.reassembler.process_packet.return_value = []
-    pipeline.reassembler.flush.return_value = []
-
-    pipeline.decoder.flush.return_value = None
+    pipeline.normaliser.normalise.return_value = make_structured_event()
+    pipeline.emitter.emit.return_value = make_structured_event()
 
     events = list(pipeline.parse_stream([]))
 
     assert events == []
+    pipeline.emitter.emit.assert_not_called()
+
+
+def test_stranded_segments_are_not_emitted(pipeline):
+    pipeline.reassembler.process_packet.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (2, 40)
+    pipeline.decoder.flush.return_value = None
+
+    pipeline.emitter.emit.return_value = make_structured_event()
+
+    events = list(pipeline.parse_stream([]))
+
+    assert events == []
+    pipeline.emitter.emit.assert_not_called()
+
+
+def test_discarded_reassembly_is_reported_to_the_observer():
+    observer = MagicMock()
+    pipeline = ParserPipeline(observer=observer)
+
+    pipeline.reassembler = MagicMock()
+    pipeline.decoder = MagicMock()
+    pipeline.reassembler.process_packet.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (2, 40)
+    pipeline.decoder.flush.return_value = None
+
+    list(pipeline.parse_stream([]))
+
+    observer.on_packet_dropped.assert_called_once_with(
+        "incomplete_reassembly_at_end_of_stream",
+        {"segments": 2, "bytes": 40},
+    )
+
+
+def test_discarded_remainder_is_reported_to_the_observer():
+    observer = MagicMock()
+    pipeline = ParserPipeline(observer=observer)
+
+    pipeline.reassembler = MagicMock()
+    pipeline.decoder = MagicMock()
+    pipeline.reassembler.process_packet.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
+    pipeline.decoder.flush.return_value = framed(b"truncated")
+
+    list(pipeline.parse_stream([]))
+
+    observer.on_packet_dropped.assert_called_once_with(
+        "incomplete_message_at_end_of_stream",
+        {"bytes": len(b"truncated"), "observed_at": BASE_TIME.isoformat()},
+    )
+
+
+def test_clean_stream_reports_no_drops():
+    observer = MagicMock()
+    pipeline = ParserPipeline(observer=observer)
+
+    pipeline.reassembler = MagicMock()
+    pipeline.decoder = MagicMock()
+    pipeline.reassembler.process_packet.return_value = []
+    pipeline.reassembler.discard_incomplete.return_value = (0, 0)
+    pipeline.decoder.flush.return_value = None
+
+    list(pipeline.parse_stream([]))
+
+    observer.on_packet_dropped.assert_not_called()

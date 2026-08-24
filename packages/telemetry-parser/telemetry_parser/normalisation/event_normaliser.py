@@ -45,22 +45,25 @@ class EventNormaliser:
     def normalise(
         self,
         extracted: ExtractedEventFields,
+        observed_at: datetime,
         trace_id: str | None = None,
-        observed_at: datetime | None = None,
     ) -> StructuredEvent:
         """
         Parameters
         ----------
         observed_at:
             Packet capture time for the message this event came from — the
-            timestamp of the packet carrying its first byte. Used as the
-            event time when the message itself supplies none, in place of
-            ingestion wall-clock, which is not reproducible on replay.
+            timestamp of the packet carrying its first byte, per ADR-001.
+
+            Required, and the only source of event time. Devices send plain
+            RFC 3261, which carries no timestamp, so there is nothing to
+            fall back from. An event with no observation time cannot be
+            dated at all, and inventing one from the clock would make
+            replay non-reproducible.
         """
 
         event_timestamp = TimestampUtils.normalise_event_timestamp(
-            extracted.event_timestamp,
-            fallback_timestamp=observed_at,
+            observed_at
         )
 
         ingest_timestamp = (
@@ -128,10 +131,7 @@ class EventNormaliser:
         return {
             "device_id": extracted.device_id,
             "registration_status": extracted.registration_status,
-            "latency": extracted.latency,
-            "retry_count": extracted.retry_count,
             "transport_protocol": extracted.transport_protocol,
-            "session_duration": extracted.session_duration,
             "call_id": extracted.call_id,
             "source_ip": extracted.source_ip,
         }
