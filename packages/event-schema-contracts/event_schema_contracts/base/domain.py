@@ -23,6 +23,19 @@ class DomainEventPayload(
     fields listed in ``__uuid_v4_or_v5_fields__`` accept v5 as well, which is
     what makes replay-deterministic identifiers possible. See
     ``docs/base-model-conventions.md``.
+
+    Strictness
+    ----------
+    ``extra="forbid"`` matches ``BaseEvent``: an unrecognised field is a
+    producer/consumer contract mismatch, not something to drop silently.
+    Without it payloads defaulted to pydantic's ``extra="ignore"``, so a
+    field the schema did not declare was accepted and discarded — the
+    envelope enforced the contract the library documents while the
+    payloads quietly did not. Silent loss is the worst outcome here: the
+    event validates, the field never reaches storage, and replay cannot
+    recover what was never persisted.
     """
 
-    pass
+    model_config = {
+        "extra": "forbid",
+    }
