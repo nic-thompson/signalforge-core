@@ -1,0 +1,131 @@
+# Release workflow for event-schema-contracts
+#
+# Consumers pin this library by git tag, so a tag has to mean exactly one
+# immutable commit and has to agree with the version inside the package.
+# This workflow derives the tag from pyproject.toml rather than accepting
+# one pushed by hand, which makes the version a single fact instead of two
+# that can disagree. Nobody can tag v0.8.0 while the package says 0.7.0.
+#
+# It runs on every push to main and does nothing unless the version has
+# changed, so an ordinary merge is a no-op. Bumping the version in
+# pyproject.toml is what cuts a release.
+#
+# Tests and typecheck run again here rather than trusting the CI run on
+# the merge commit. The suite takes under a second, and a tag that
+# consumers pin is worth the duplication.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: tag and release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Read version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python -c "
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
+          print(data['project']['version'])
+          ")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version in pyproject.toml: $VERSION"
+
+      - name: Check whether this version is already released
+        id: check
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.version.outputs.tag }} already exists - nothing to do."
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            echo "${{ steps.version.outputs.tag }} is new - will release."
+          fi
+
+      - name: Install dependencies
+        if: steps.check.outputs.released == 'false'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install build
+
+      - name: Typecheck
+        if: steps.check.outputs.released == 'false'
+        run: mypy event_schema_contracts
+
+      - name: Test
+        if: steps.check.outputs.released == 'false'
+        run: pytest -q
+
+      # A release whose CHANGELOG entry is missing gives consumers a
+      # version they cannot find out anything about. Fail rather than
+      # publish one.
+      - name: Require a CHANGELOG entry
+        if: steps.check.outputs.released == 'false'
+        run: |
+          if ! grep -q "^## ${{ steps.version.outputs.version }} " CHANGELOG.md; then
+            echo "::error::No CHANGELOG.md entry for ${{ steps.version.outputs.version }}."
+            exit 1
+          fi
+
+      - name: Extract release notes
+        if: steps.check.outputs.released == 'false'
+        run: |
+          python - <<'EOF' > release-notes.md
+          import pathlib, re, os
+
+          version = os.environ["VERSION"]
+          text = pathlib.Path("CHANGELOG.md").read_text()
+
+          # The section for this version, up to the next version heading.
+          pattern = rf"^## {re.escape(version)} .*?$(.*?)(?=^## |\Z)"
+          match = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+
+          print(match.group(1).strip() if match else "")
+          EOF
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Build distributions
+        if: steps.check.outputs.released == 'false'
+        run: python -m build
+
+      - name: Create tag and release
+        if: steps.check.outputs.released == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            dist/*

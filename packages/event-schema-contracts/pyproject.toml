@@ -1,6 +1,6 @@
 [project]
 name = "event-schema-contracts"
-version = "0.6.0"
+version = "0.7.0"
 description = "Canonical telemetry event schema contracts for ingestion pipelines"
 requires-python = ">=3.11"
 

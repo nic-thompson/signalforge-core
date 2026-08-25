@@ -4,7 +4,7 @@
 
 `event-schema-contracts` defines the authoritative, versioned event schemas shared across every SignalForge service — parsers, the streaming analytics control plane, feature pipelines, dataset exporters, alert routing, and replay workflows. It is the schema authority layer: no service defines event schemas independently of this repository.
 
-**Current version:** `v0.6.0`. Backward-compatible within the `v0` line; minor versions add domains and optional fields (see the schema-evolution policy below).
+**Current version:** `v0.7.0` — the first tagged release. Backward-compatible within the `v0` line; while the major version is 0, a breaking change bumps the minor (see the schema-evolution policy below). See [CHANGELOG.md](CHANGELOG.md) for what each version says.
 
 ---
 
@@ -28,8 +28,17 @@ It defines the compatibility boundary between ingestion, parsing, streaming anal
 Install a pinned schema version — pinning is what gives downstream services deterministic replay and dataset reproducibility:
 
 ```
-pip install "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.6.0"
+pip install "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.7.0"
 ```
+
+Pin a tag, never a branch. A tag resolves to one immutable commit, which is what
+makes it possible to say which version of the contract a component validated
+against — and to get the same answer again on replay.
+
+Do not copy this package's source into a consuming repository. A copied schema is
+a fork the moment it lands: nothing constrains it, nothing notices when it drifts,
+and two plausible definitions of the same event can coexist indefinitely. Keeping
+one definition is the entire purpose of this repository.
 
 For development:
 
@@ -38,6 +47,19 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+---
+
+## Releasing
+
+The version in `pyproject.toml` is the single source of truth. Merging a version
+bump to `main` cuts the release: CI tags `v<version>`, builds the distributions,
+and publishes a GitHub release with that version's `CHANGELOG.md` section as its
+notes. Tags are never pushed by hand, so the tag and the packaged version cannot
+disagree.
+
+A release with no `CHANGELOG.md` entry for its version fails the build rather than
+publishing. A version consumers cannot read about is one they cannot reason about.
 
 ---
 
