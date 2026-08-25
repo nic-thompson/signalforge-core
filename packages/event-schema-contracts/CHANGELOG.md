@@ -4,15 +4,18 @@ Consumers pin this library by git tag, so each entry here is what a component
 gets when it pins that version. Every schema change belongs in this file,
 because a version consumers cannot read about is one they cannot reason about.
 
-Versions before 0.7.0 were never tagged or released, so nothing could depend on
-them. They are not listed.
+Versions 0.3.0 through 0.6.0 were tagged by hand and are pinnable, but predate
+this file, so their contents are recorded only in their commit history. They are
+not listed. 0.7.0 is the first version published as a GitHub release and the
+first with an entry here.
 
 While the major version is 0, a breaking change bumps the minor. See
 docs/compatibility-policy.md for what counts as breaking.
 
 ## 0.7.0 — 2026-08-25
 
-First released version. Everything before this existed only as commits on main.
+First version cut by the release workflow, and the first with a changelog entry.
+Earlier versions were tagged by hand.
 
 ### Removed
 

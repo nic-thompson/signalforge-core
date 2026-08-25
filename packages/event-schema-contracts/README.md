@@ -4,7 +4,7 @@
 
 `event-schema-contracts` defines the authoritative, versioned event schemas shared across every SignalForge service — parsers, the streaming analytics control plane, feature pipelines, dataset exporters, alert routing, and replay workflows. It is the schema authority layer: no service defines event schemas independently of this repository.
 
-**Current version:** `v0.7.0` — the first tagged release. Backward-compatible within the `v0` line; while the major version is 0, a breaking change bumps the minor (see the schema-evolution policy below). See [CHANGELOG.md](CHANGELOG.md) for what each version says.
+**Current version:** `v0.7.0`. Backward-compatible within the `v0` line; while the major version is 0, a breaking change bumps the minor (see the schema-evolution policy below). See [CHANGELOG.md](CHANGELOG.md) for what each version says.
 
 ---
 

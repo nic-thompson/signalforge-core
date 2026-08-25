@@ -2,9 +2,14 @@
 #
 # Consumers pin this library by git tag, so a tag has to mean exactly one
 # immutable commit and has to agree with the version inside the package.
-# This workflow derives the tag from pyproject.toml rather than accepting
-# one pushed by hand, which makes the version a single fact instead of two
-# that can disagree. Nobody can tag v0.8.0 while the package says 0.7.0.
+#
+# Tags v0.3.0 to v0.6.0 were pushed by hand and are all correct. Nothing
+# made them correct, though: a hand-pushed tag has no link to the version
+# inside the package, so v0.6.0 could have pointed at a tree declaring
+# something else and nobody would have found out until a consumer pinned
+# it and got a surprise. This workflow derives the tag from pyproject.toml
+# instead, which makes the version a single fact rather than two that
+# happen to agree. Nobody can tag v0.8.0 while the package says 0.7.0.
 #
 # It runs on every push to main and does nothing unless the version has
 # changed, so an ordinary merge is a no-op. Bumping the version in
