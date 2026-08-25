@@ -25,8 +25,6 @@ class EventNormaliser:
     def __init__(
         self,
         store_id: str,
-        replay_mode: bool = False,
-        preserve_event_ids: bool = False,
         observer: ParserObserver | None = None,
     ) -> None:
         """
@@ -47,17 +45,9 @@ class EventNormaliser:
             boundary derives each device's stable UUIDv5 identity from
             (store_id, device_label), so a controller configured with the
             wrong store silently re-identifies every device it observes.
-
-        replay_mode:
-            Enables deterministic replay behaviour.
-
-        preserve_event_ids:
-            Prevents regeneration of event identifiers during dataset backfills.
         """
 
         self.store_id = self._validate_store_id(store_id)
-        self.replay_mode = replay_mode
-        self.preserve_event_ids = preserve_event_ids
         self.observer = observer
 
     def normalise(
@@ -84,26 +74,12 @@ class EventNormaliser:
             observed_at
         )
 
-        ingest_timestamp = (
-            extracted.ingest_timestamp
-            if self.replay_mode and hasattr(extracted, "ingest_timestamp")
-            else TimestampUtils.ingest_timestamp()
-        )
+        ingest_timestamp = TimestampUtils.ingest_timestamp()
 
-        event_id = (
-            extracted.event_id
-            if self.preserve_event_ids and hasattr(extracted, "event_id")
-            else str(uuid.uuid4())
-        )
+        event_id = str(uuid.uuid4())
 
         resolved_trace_id = (
-            trace_id
-            if trace_id is not None
-            else (
-                extracted.trace_id
-                if self.replay_mode and hasattr(extracted, "trace_id")
-                else str(uuid.uuid4())
-            )
+            trace_id if trace_id is not None else str(uuid.uuid4())
         )
 
         event_type = self._map_event_type(extracted)

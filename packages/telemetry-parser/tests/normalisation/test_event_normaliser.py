@@ -197,3 +197,17 @@ def test_device_labels_can_collide_across_stores():
 
     assert bristol["device_label"] == leeds["device_label"]
     assert bristol["store_id"] != leeds["store_id"]
+
+
+@pytest.mark.parametrize("removed", ["replay_mode", "preserve_event_ids"])
+def test_inert_replay_flags_are_gone(removed):
+    """
+    Both flags gated branches on hasattr(extracted, "ingest_timestamp"),
+    "event_id" and "trace_id" — fields ExtractedEventFields has never had.
+    Every guard was permanently false, so setting either changed nothing.
+    A flag named replay_mode that silently does nothing is worse than no
+    flag, so they were removed rather than implemented.
+    """
+
+    with pytest.raises(TypeError):
+        EventNormaliser(store_id=STORE_ID, **{removed: True})

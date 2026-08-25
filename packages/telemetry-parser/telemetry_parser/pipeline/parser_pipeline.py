@@ -24,8 +24,6 @@ class ParserPipeline:
     def __init__(
         self,
         store_id: str,
-        replay_mode: bool = False,
-        preserve_event_ids: bool = False,
         observer: ParserObserver | None = None
     ) -> None:
         """
@@ -39,16 +37,9 @@ class ParserPipeline:
             traffic and cannot be inferred from it. See
             docs/ADR-001-edge-producer-contract.md.
 
-        replay_mode:
-            Enables deterministic replay semantics where supported by downstream components.
-
-        preserve_event_ids:
-            Prevents regeneration of event identifiers during dataset backfills.
         """
 
         self.store_id = store_id
-        self.replay_mode = replay_mode
-        self.preserve_event_ids = preserve_event_ids
         self.observer = observer
 
         self.reassembler = TCPReassembler(observer)
@@ -58,13 +49,10 @@ class ParserPipeline:
 
         self.normaliser = EventNormaliser(
             store_id=store_id,
-            replay_mode=replay_mode,
-            preserve_event_ids=preserve_event_ids,
             observer=observer,
         )
 
         self.emitter = EventEmitter(
-            preserve_event_ids=preserve_event_ids,
             observer=observer
         )
 
