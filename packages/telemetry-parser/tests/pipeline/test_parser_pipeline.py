@@ -11,6 +11,7 @@ from telemetry_parser.stream.observation import (
 )
 
 BASE_TIME = datetime(2026, 8, 24, 12, 0, 0, tzinfo=timezone.utc)
+STORE_ID = "store-0042"
 
 
 def framed(data: bytes = b"msg", offset_seconds: float = 0.0) -> TimestampedMessage:
@@ -57,7 +58,7 @@ def make_structured_event() -> StructuredEvent:
 
 @pytest.fixture
 def pipeline():
-    pipeline = ParserPipeline()
+    pipeline = ParserPipeline(store_id=STORE_ID)
 
     pipeline.reassembler = MagicMock()
     pipeline.decoder = MagicMock()
@@ -236,7 +237,7 @@ def test_stranded_segments_are_not_emitted(pipeline):
 
 def test_discarded_reassembly_is_reported_to_the_observer():
     observer = MagicMock()
-    pipeline = ParserPipeline(observer=observer)
+    pipeline = ParserPipeline(store_id=STORE_ID, observer=observer)
 
     pipeline.reassembler = MagicMock()
     pipeline.decoder = MagicMock()
@@ -254,7 +255,7 @@ def test_discarded_reassembly_is_reported_to_the_observer():
 
 def test_discarded_remainder_is_reported_to_the_observer():
     observer = MagicMock()
-    pipeline = ParserPipeline(observer=observer)
+    pipeline = ParserPipeline(store_id=STORE_ID, observer=observer)
 
     pipeline.reassembler = MagicMock()
     pipeline.decoder = MagicMock()
@@ -272,7 +273,7 @@ def test_discarded_remainder_is_reported_to_the_observer():
 
 def test_clean_stream_reports_no_drops():
     observer = MagicMock()
-    pipeline = ParserPipeline(observer=observer)
+    pipeline = ParserPipeline(store_id=STORE_ID, observer=observer)
 
     pipeline.reassembler = MagicMock()
     pipeline.decoder = MagicMock()

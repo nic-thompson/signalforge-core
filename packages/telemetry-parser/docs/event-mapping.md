@@ -39,12 +39,19 @@ sip:\<device_label\>@domain
 
 Maps to:
 
-payload.device_id
+payload.device_label
 
-Note that this is the device's own label — a name it was configured with, not an
-identifier this system issued. The ingestion boundary carries it as `device_label` and
-derives a UUIDv5 `device_id` from it together with the store identity. See
-event-schema-contracts ADR-002.
+The name is deliberate. This is the device's own label — a name it was configured with,
+not an identifier this system issued — and it is unique only within a store. Two stores
+may both have a `headset-12`, and they are different devices.
+
+Calling it `device_id` would invite a join across stores that silently merges them: no
+error, just wrong numbers that look like two devices behaving identically. The parser has
+no device identifier to emit, and now says so.
+
+The stable identity is derived at the ingestion boundary as a UUIDv5 over
+(store_id, device_label), with the label carried alongside because derivation is one-way.
+See event-schema-contracts ADR-002.
 
 ---
 
@@ -69,6 +76,30 @@ Maps to:
 
 payload.transport_protocol
 payload.source_ip
+
+---
+
+## Store Identity
+
+payload.store_id
+
+Not mapped from any header. Nothing in a SIP REGISTER names a store, and nothing should:
+a headset registering to a local PBX is inside one store's network, so there is exactly
+one store in scope and naming it in every message would be redundant.
+
+It comes instead from the controller's provisioned configuration, supplied when the
+pipeline is constructed. This is the only value the parser emits that it did not parse.
+
+Two consequences worth stating. A controller configured with the wrong store attributes
+every device it observes to that store, and nothing downstream can detect it, because the
+traffic never made a claim to contradict. And store identity is load-bearing beyond its
+own field: the ingestion boundary derives each device's stable UUIDv5 from
+(store_id, device_label), so the wrong store silently re-identifies every device.
+
+A missing or blank store identity is rejected when the pipeline is constructed, so a
+misconfigured controller fails at startup rather than emitting events that are rejected
+one at a time at the far end. The full grammar is enforced at the ingestion boundary,
+which owns the contract.
 
 ---
 
@@ -128,7 +159,8 @@ Example structured event:
   "event_type": "sip.registration",
   "event_timestamp": "2026-08-24T09:30:00+00:00",
   "payload": {
-    "device_id": "handset-42",
+    "store_id": "store-0042",
+    "device_label": "handset-42",
     "registration_status": "registered",
     "transport_protocol": "TCP",
     "call_id": "abc123@10.0.0.5",

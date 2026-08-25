@@ -15,7 +15,11 @@ class ExtractedEventFields:
     docs/ADR-001-edge-producer-contract.md.
     """
 
-    device_id: str | None
+    # The From header's user part: a name the device was configured
+    # with, not an identifier this system issued. It is unique only
+    # within a store, which is why the stable device identity is
+    # derived downstream from (store_id, device_label).
+    device_label: str | None
     registration_status: Literal["registered"] | None
     transport_protocol: str | None
     call_id: str | None

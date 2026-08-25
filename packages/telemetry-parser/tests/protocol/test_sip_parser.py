@@ -21,7 +21,7 @@ def test_parse_valid_register_message():
 
     assert isinstance(msg, SIPMessage)
     assert msg.method == "REGISTER"
-    assert msg.device_id == "handset-42"
+    assert msg.device_label == "handset-42"
     assert msg.call_id == "abc123"
     assert msg.transport == "TCP" 
     assert msg.source_ip == "10.0.0.5"
@@ -57,7 +57,7 @@ def test_missing_from_header():
 
     msg = parser.parse(raw)
 
-    assert msg.device_id is None
+    assert msg.device_label is None
 
 
 def test_missing_call_id():
@@ -111,7 +111,7 @@ def test_parse_non_register_method_still_parses():
     msg = parser.parse(raw)
 
     assert msg.method == "INVITE"
-    assert msg.device_id == "device"
+    assert msg.device_label == "device"
 
 
 def test_parse_malformed_headers_ignored_safely():
@@ -129,7 +129,7 @@ def test_parse_malformed_headers_ignored_safely():
 
     msg = parser.parse(raw)
 
-    assert msg.device_id == "handset-42"
+    assert msg.device_label == "handset-42"
     assert msg.transport == "TCP"
 
 

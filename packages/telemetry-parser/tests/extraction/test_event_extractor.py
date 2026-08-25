@@ -12,7 +12,7 @@ _DEFAULT_HEADERS = object()
 
 def make_register_message(
     headers: dict | None = _DEFAULT_HEADERS,
-    device_id: str | None = "handset-42",
+    device_label: str | None = "handset-42",
     call_id: str | None = "abc123",
     transport: str | None = "TCP",
     source_ip: str | None = "10.0.0.5",
@@ -22,7 +22,7 @@ def make_register_message(
     return SIPMessage(
         method="REGISTER",
         headers=headers,
-        device_id=device_id,
+        device_label=device_label,
         call_id=call_id,
         transport=transport,
         source_ip=source_ip,
@@ -46,12 +46,12 @@ def test_extract_returns_extracted_event_fields(extractor):
     assert isinstance(result, ExtractedEventFields)
 
 
-def test_extract_maps_device_id(extractor):
-    msg = make_register_message(device_id="handset-99")
+def test_extract_maps_device_label(extractor):
+    msg = make_register_message(device_label="handset-99")
 
     result = extractor.extract(msg)
 
-    assert result.device_id == "handset-99"
+    assert result.device_label == "handset-99"
 
 
 def test_extract_maps_call_id(extractor):
@@ -112,7 +112,7 @@ def test_non_standard_headers_are_ignored(extractor):
 def test_extract_with_no_optional_headers_returns_none_fields(extractor):
     msg = make_register_message(
         headers={},
-        device_id=None,
+        device_label=None,
         call_id=None,
         transport=None,
         source_ip=None,
@@ -120,7 +120,7 @@ def test_extract_with_no_optional_headers_returns_none_fields(extractor):
 
     result = extractor.extract(msg)
 
-    assert result.device_id is None
+    assert result.device_label is None
     assert result.call_id is None
     assert result.transport_protocol is None
     assert result.source_ip is None
@@ -135,7 +135,7 @@ def test_extract_raises_for_invite_method(extractor):
     msg = SIPMessage(
         method="INVITE",
         headers={},
-        device_id=None,
+        device_label=None,
         call_id=None,
         transport=None,
         source_ip=None,
@@ -149,7 +149,7 @@ def test_extract_raises_for_options_method(extractor):
     msg = SIPMessage(
         method="OPTIONS",
         headers={},
-        device_id=None,
+        device_label=None,
         call_id=None,
         transport=None,
         source_ip=None,

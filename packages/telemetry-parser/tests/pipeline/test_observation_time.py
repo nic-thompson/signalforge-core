@@ -19,6 +19,7 @@ from telemetry_parser.pipeline.parser_pipeline import ParserPipeline
 from telemetry_parser.stream.tcp_reassembler import TCPPacket
 
 CAPTURED_AT = datetime(2026, 8, 24, 9, 30, 0, tzinfo=timezone.utc)
+STORE_ID = "store-0042"
 
 
 def register_message(device: str = "headset-12", call_id: str = "abc123") -> bytes:
@@ -53,7 +54,7 @@ def packet(
 
 def test_event_time_comes_from_packet_capture():
     events = list(
-        ParserPipeline().parse_stream(
+        ParserPipeline(store_id=STORE_ID).parse_stream(
             [packet(register_message(), 1000, CAPTURED_AT)]
         )
     )
@@ -72,7 +73,7 @@ def test_event_time_is_not_processing_time():
     old_capture = datetime(2019, 3, 1, 14, 0, 0, tzinfo=timezone.utc)
 
     events = list(
-        ParserPipeline().parse_stream(
+        ParserPipeline(store_id=STORE_ID).parse_stream(
             [packet(register_message(), 1000, old_capture)]
         )
     )
@@ -90,8 +91,8 @@ def test_reparsing_the_same_capture_gives_the_same_event_time():
 
     packets = [packet(register_message(), 1000, CAPTURED_AT)]
 
-    first = list(ParserPipeline().parse_stream(packets))
-    second = list(ParserPipeline().parse_stream(packets))
+    first = list(ParserPipeline(store_id=STORE_ID).parse_stream(packets))
+    second = list(ParserPipeline(store_id=STORE_ID).parse_stream(packets))
 
     assert [event.event_timestamp for event in first] == [
         event.event_timestamp for event in second
@@ -110,7 +111,7 @@ def test_message_split_across_packets_takes_the_first_packets_time():
     later = CAPTURED_AT + timedelta(seconds=3)
 
     events = list(
-        ParserPipeline().parse_stream(
+        ParserPipeline(store_id=STORE_ID).parse_stream(
             [
                 packet(message[:split], 1000, CAPTURED_AT),
                 packet(message[split:], 1000 + split, later),
@@ -136,7 +137,7 @@ def test_out_of_order_packets_keep_their_own_observation_times():
     second_time = CAPTURED_AT + timedelta(seconds=2)
 
     events = list(
-        ParserPipeline().parse_stream(
+        ParserPipeline(store_id=STORE_ID).parse_stream(
             [
                 packet(first_message, 1000, CAPTURED_AT),
                 packet(second_message, 1000 + len(first_message), second_time),
@@ -164,7 +165,7 @@ def test_buffered_segment_keeps_arrival_time_not_release_time():
     filled_gap = CAPTURED_AT + timedelta(seconds=9)
 
     events = list(
-        ParserPipeline().parse_stream(
+        ParserPipeline(store_id=STORE_ID).parse_stream(
             [
                 packet(message[:third], 1000, arrived_first),
                 # tail arrives early and is buffered behind the gap
@@ -177,3 +178,26 @@ def test_buffered_segment_keeps_arrival_time_not_release_time():
 
     assert len(events) == 1
     assert events[0].event_timestamp == arrived_first
+
+
+def test_store_id_reaches_the_emitted_payload():
+    """
+    End to end: configuration supplied at the pipeline's construction
+    appears on the event, having travelled through a chain that parsed
+    nothing of the sort out of the traffic.
+    """
+
+    events = list(
+        ParserPipeline(store_id="store-0042").parse_stream(
+            [packet(register_message(), 1000, CAPTURED_AT)]
+        )
+    )
+
+    assert events[0].payload["store_id"] == "store-0042"
+
+
+def test_pipeline_refuses_to_start_without_a_store_id():
+    import pytest
+
+    with pytest.raises(ValueError):
+        ParserPipeline(store_id="")

@@ -10,7 +10,8 @@ class MalformedSIPMessageError(Exception):
 class SIPMessage:
     method: str
     headers: Dict[str, str]
-    device_id: str | None
+    # From-header user part — a configured name, not an issued id.
+    device_label: str | None
     call_id: str | None
     transport: str | None
     source_ip: str | None
@@ -63,7 +64,7 @@ class SIPParser:
 
         headers = self._parse_headers(lines[1:])
 
-        device_id = self._extract_device_id(headers)
+        device_label = self._extract_device_label(headers)
 
         call_id = headers.get("call-id")
 
@@ -72,7 +73,7 @@ class SIPParser:
         return SIPMessage(
             method=method,
             headers=headers,
-            device_id=device_id,
+            device_label=device_label,
             call_id=call_id,
             transport=transport,
             source_ip=source_ip,
@@ -98,7 +99,7 @@ class SIPParser:
         return headers
 
 
-    def _extract_device_id(
+    def _extract_device_label(
         self,
         headers: Dict[str, str],
     ) -> str | None:

@@ -35,7 +35,7 @@ class EventExtractor:
         )
 
         return ExtractedEventFields(
-            device_id=message.device_id,
+            device_label=message.device_label,
             registration_status=registration_status,
             transport_protocol=message.transport,
             call_id=message.call_id,

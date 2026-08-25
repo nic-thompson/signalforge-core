@@ -24,6 +24,7 @@ class EventNormaliser:
 
     def __init__(
         self,
+        store_id: str,
         replay_mode: bool = False,
         preserve_event_ids: bool = False,
         observer: ParserObserver | None = None,
@@ -31,6 +32,22 @@ class EventNormaliser:
         """
         Parameters
         ----------
+        store_id:
+            Identity of the store this controller serves, taken from its
+            provisioned configuration.
+
+            Required. It is the first value this parser carries that it did
+            not parse, and it has to come from configuration because it is
+            not in the traffic: a headset registering to a local PBX is
+            inside one store's network, so there is exactly one store in
+            scope and nothing in the protocol names it. See
+            docs/ADR-001-edge-producer-contract.md.
+
+            It is also load-bearing beyond its own field — the ingestion
+            boundary derives each device's stable UUIDv5 identity from
+            (store_id, device_label), so a controller configured with the
+            wrong store silently re-identifies every device it observes.
+
         replay_mode:
             Enables deterministic replay behaviour.
 
@@ -38,6 +55,7 @@ class EventNormaliser:
             Prevents regeneration of event identifiers during dataset backfills.
         """
 
+        self.store_id = self._validate_store_id(store_id)
         self.replay_mode = replay_mode
         self.preserve_event_ids = preserve_event_ids
         self.observer = observer
@@ -129,9 +147,43 @@ class EventNormaliser:
     ) -> Dict[str, Any]:
 
         return {
-            "device_id": extracted.device_id,
+            "store_id": self.store_id,
+            "device_label": extracted.device_label,
             "registration_status": extracted.registration_status,
             "transport_protocol": extracted.transport_protocol,
             "call_id": extracted.call_id,
             "source_ip": extracted.source_ip,
         }
+
+    @staticmethod
+    def _validate_store_id(store_id: str) -> str:
+        """
+        Rejects a store identity that is missing or malformed enough to be
+        certainly a misconfiguration.
+
+        This deliberately stops short of the full grammar that
+        ``sip.registration v1`` enforces. This parser does not depend on
+        ``event-schema-contracts``, so it cannot import that pattern, and
+        copying the regex here would create a second definition free to
+        drift from the first — which is the failure this whole line of work
+        has been unpicking. The authoritative check belongs at the ingestion
+        boundary, which owns the contract.
+
+        What is caught here is the case worth catching early: an unset or
+        blank configuration value. A controller with no store identity
+        should refuse to start rather than emit a stream of events that are
+        rejected one at a time, far from the cause.
+        """
+
+        if not isinstance(store_id, str) or not store_id.strip():
+            raise ValueError(
+                "store_id is required and must be a non-empty string; "
+                "it comes from the controller's provisioned configuration"
+            )
+
+        if store_id != store_id.strip() or any(c.isspace() for c in store_id):
+            raise ValueError(
+                f"store_id must not contain whitespace, got {store_id!r}"
+            )
+
+        return store_id
