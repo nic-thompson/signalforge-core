@@ -65,7 +65,7 @@ This is also the stronger guarantee. In AWS IoT Core a device authenticates with
 - Four header mappings and three `ExtractedEventFields` fields are deleted. `docs/event-mapping.md` documents exactly the mappings being removed and is rewritten in the same change.
 - `observed_at` gains a real source. DEFECT-2's fix is now specified rather than discretionary.
 - `ParserPipeline` gains a required `store_id`. Every existing construction site and test changes.
-- `sip.unknown` is unaffected by this ADR and remains unresolved: `_map_event_type` emits it when `registration_status` is `None`, and no schema of that identity exists in `event-schema-contracts`. Tracked separately.
+- `sip.unknown` has been removed. It was emitted when `registration_status` was `None` — a REGISTER whose CSeq disagreed with its request line — and no schema of that identity ever existed in `event-schema-contracts`. It was not an event type but a parse failure with one's name, and the event it produced carried a null `registration_status` into a payload whose schema requires that field, so it could never have validated. Those messages are now dropped at extraction and reported as `register_cseq_mismatch`, consistent with how this ADR treats every other malformed input. `sip.registration` is the parser's only event type.
 - A SIP traffic generator becomes buildable, producing plain RFC 3261 REGISTER streams and PCAP fixtures. It is smaller than a generator for annotated traffic would have been, and it is what the unbuilt packet-capture component will be tested against.
 - The parser's test fixtures currently carry the invented headers. They are rewritten to plain SIP, which is what makes this ADR verifiable rather than aspirational.
 

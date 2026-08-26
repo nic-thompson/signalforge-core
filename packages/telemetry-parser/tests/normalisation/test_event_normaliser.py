@@ -46,19 +46,20 @@ def test_registered_status_maps_to_sip_registration():
     assert event.event_type == "sip.registration"
 
 
-def test_missing_registration_status_maps_to_sip_unknown():
+def test_every_event_is_a_sip_registration():
     """
-    A REGISTER message the extractor accepted (method matched) but
-    whose CSeq header was missing or malformed, so no status could be
-    read. Renamed alongside "device.registration" for the same reason:
-    "device.unknown" was an equally orphaned identity with no schema.
+    There is one event type. This used to branch to "sip.unknown" when
+    registration_status was None, but the extractor now rejects the
+    malformed messages that produced that, so no such event reaches here.
     """
-    normaliser = EventNormaliser(store_id=STORE_ID)
-    extracted = make_extracted(registration_status=None)
 
-    event = normalise(normaliser, extracted)
+    event = normalise(EventNormaliser(store_id=STORE_ID), make_extracted())
 
-    assert event.event_type == "sip.unknown"
+    assert event.event_type == "sip.registration"
+
+
+def test_normaliser_no_longer_chooses_an_event_type():
+    assert not hasattr(EventNormaliser(store_id=STORE_ID), "_map_event_type")
 
 
 def test_event_type_never_uses_device_prefix():

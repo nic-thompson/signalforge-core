@@ -22,17 +22,37 @@ class EventExtractor:
         self,
         message: SIPMessage,
     ) -> ExtractedEventFields | None:
-        
+        """
+        Returns the extracted fields, or None if the message is a REGISTER
+        that contradicts itself and cannot be described.
+
+        A missing or disagreeing CSeq used to produce an event typed
+        "sip.unknown". That was a parse failure dressed as an event type:
+        no schema was ever registered for it, and the event it produced
+        carried a null registration_status into a payload whose schema
+        declares that field required — so it could not have validated
+        anywhere. Malformed input is dropped and reported, as it is
+        everywhere else in this pipeline. See
+        docs/ADR-001-edge-producer-contract.md.
+        """
+
         if message.method != "REGISTER":
             raise UnsupportedProtocolEvent(
                 f"Unsupported SIP method: {message.method}"
             )
-        
+
         headers = message.headers
 
         registration_status = self.mapper.map_registration_status(
             headers
         )
+
+        if registration_status is None:
+            if self.observer:
+                self.observer.on_parse_error(
+                    "register_cseq_mismatch",
+                )
+            return None
 
         return ExtractedEventFields(
             device_label=message.device_label,

@@ -22,6 +22,15 @@ class EventNormaliser:
     DEFAULT_SCHEMA_VERSION = "v1"
     DEFAULT_SOURCE = "telemetry-parser"
 
+    # A constant rather than a choice. This used to select between
+    # "sip.registration" and "sip.unknown", but the extractor now rejects
+    # the malformed messages that produced the latter, so there is one
+    # event type. "sip.registration" rather than "device.registration":
+    # that identity was already registered by event-schema-contracts for
+    # device provisioning, a different domain with an incompatible field
+    # set. See event-schema-contracts ADR-002.
+    EVENT_TYPE = "sip.registration"
+
     def __init__(
         self,
         store_id: str,
@@ -82,8 +91,6 @@ class EventNormaliser:
             trace_id if trace_id is not None else str(uuid.uuid4())
         )
 
-        event_type = self._map_event_type(extracted)
-
         payload = self._build_payload(extracted)
 
         return StructuredEvent(
@@ -92,30 +99,10 @@ class EventNormaliser:
             trace_id=resolved_trace_id,
             event_timestamp=event_timestamp,
             ingest_timestamp=ingest_timestamp,
-            event_type=event_type,
+            event_type=self.EVENT_TYPE,
             source=self.DEFAULT_SOURCE,
             payload=payload,
         )
-
-    def _map_event_type(
-        self,
-        extracted: ExtractedEventFields,
-    ) -> str:
-        """
-        "device.registration" was the identity already registered by
-        event-schema-contracts for device *provisioning* (device_type,
-        firmware_version) — a different domain with an incompatible
-        field set from what this parser actually extracts. Emitting
-        that identity meant every event from this parser was
-        unvalidatable against any schema it could actually satisfy.
-        "sip.registration" is the schema built for this parser's real
-        output. See event-schema-contracts ADR-002.
-        """
-
-        if extracted.registration_status == "registered":
-            return "sip.registration"
-
-        return "sip.unknown"
 
     def _build_payload(
         self,

@@ -23,11 +23,19 @@ Maps to:
 
 sip.registration
 
-A REGISTER whose CSeq is missing or unparseable maps to:
+This is the only event type this parser emits.
 
-sip.unknown
+Non-REGISTER methods are rejected before mapping and produce no event. That is a
+filter, not a failure — a capture carries whatever SIP traffic is on the wire, and
+INVITE is not malformed just because this parser does not describe it.
 
-Non-REGISTER methods are rejected before mapping and produce no event.
+A REGISTER whose CSeq is missing, empty, or names a different method is a different
+case: the message contradicts its own request line, so it is malformed. It is dropped
+and reported to the observer as `register_cseq_mismatch`. It used to produce an event
+typed `sip.unknown` — an identity no schema was ever registered for, carrying a null
+`registration_status` into a payload whose schema declares that field required. Such
+an event could not have validated anywhere, so it was a parse failure wearing an
+event type.
 
 ---
 

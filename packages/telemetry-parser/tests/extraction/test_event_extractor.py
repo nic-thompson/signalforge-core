@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock
+
 import pytest
 
 from telemetry_parser.protocol.sip_parser import SIPMessage
@@ -109,9 +111,14 @@ def test_non_standard_headers_are_ignored(extractor):
     assert plain == annotated
 
 
-def test_extract_with_no_optional_headers_returns_none_fields(extractor):
+def test_extract_with_optional_headers_absent_keeps_required_fields(extractor):
+    """
+    Everything optional may be absent. CSeq may not: without it the
+    message contradicts its own request line and is rejected below.
+    """
+
     msg = make_register_message(
-        headers={},
+        headers={"cseq": "1 REGISTER"},
         device_label=None,
         call_id=None,
         transport=None,
@@ -120,11 +127,58 @@ def test_extract_with_no_optional_headers_returns_none_fields(extractor):
 
     result = extractor.extract(msg)
 
+    assert result is not None
     assert result.device_label is None
     assert result.call_id is None
     assert result.transport_protocol is None
     assert result.source_ip is None
-    assert result.registration_status is None
+    assert result.registration_status == "registered"
+
+
+# ----------------------------------------------------------------
+# self-contradicting REGISTER
+# ----------------------------------------------------------------
+
+# A request line saying REGISTER with a CSeq saying otherwise is a
+# malformed message, not a different kind of message. It used to become
+# an event typed "sip.unknown" — an identity no schema was ever
+# registered for, carrying a null registration_status into a payload
+# whose schema declares that field required, so it could never have
+# validated anywhere. It is now dropped and reported, as malformed input
+# is everywhere else in this pipeline.
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"cseq": ""},
+        {"cseq": "1 INVITE"},
+        {"cseq": "malformed"},
+    ],
+)
+def test_contradicting_cseq_is_rejected(extractor, headers):
+    result = extractor.extract(make_register_message(headers=headers))
+
+    assert result is None
+
+
+def test_rejection_is_reported_to_the_observer():
+    observer = MagicMock()
+    extractor = EventExtractor(observer=observer)
+
+    extractor.extract(make_register_message(headers={"cseq": "1 INVITE"}))
+
+    observer.on_parse_error.assert_called_once_with("register_cseq_mismatch")
+
+
+def test_accepted_message_reports_no_parse_error():
+    observer = MagicMock()
+    extractor = EventExtractor(observer=observer)
+
+    extractor.extract(make_register_message(headers={"cseq": "1 REGISTER"}))
+
+    observer.on_parse_error.assert_not_called()
 
 
 # ----------------------------------------------------------------

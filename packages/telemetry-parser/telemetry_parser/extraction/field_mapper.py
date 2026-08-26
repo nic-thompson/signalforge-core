@@ -20,7 +20,10 @@ class ExtractedEventFields:
     # within a store, which is why the stable device identity is
     # derived downstream from (store_id, device_label).
     device_label: str | None
-    registration_status: Literal["registered"] | None
+    # Not optional. A REGISTER whose CSeq does not agree with its request
+    # line is malformed and is rejected during extraction, so if one of
+    # these exists at all, it describes a registration.
+    registration_status: Literal["registered"]
     transport_protocol: str | None
     call_id: str | None
     source_ip: str | None
@@ -40,6 +43,16 @@ class FieldMapper:
         self,
         headers: Dict[str, str],
     ) -> Literal["registered"] | None:
+        """
+        Returns "registered" for a well-formed REGISTER, or None when the
+        CSeq header is absent or names a different method.
+
+        None means the message contradicts itself: the request line said
+        REGISTER — the extractor rejects anything else before this runs —
+        while CSeq says otherwise. That is a malformed message, not a
+        different kind of message, which is why the caller drops it rather
+        than labelling it.
+        """
 
         cseq = headers.get("cseq")
 
