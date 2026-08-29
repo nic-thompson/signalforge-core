@@ -1,6 +1,6 @@
 [project]
 name = "event-schema-contracts"
-version = "0.8.0"
+version = "0.8.1"
 description = "Canonical telemetry event schema contracts for ingestion pipelines"
 requires-python = ">=3.11"
 
@@ -18,6 +18,14 @@ dev = [
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+# PEP 561. Without py.typed shipped in the wheel, a consumer running mypy
+# against this library is told it has no type information and every import
+# from it fails as import-not-found — even though the library is itself
+# mypy --strict clean. The marker is what makes the types usable by anyone
+# other than this repository.
+[tool.setuptools.package-data]
+event_schema_contracts = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

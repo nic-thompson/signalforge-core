@@ -12,6 +12,17 @@ first with an entry here.
 While the major version is 0, a breaking change bumps the minor. See
 docs/compatibility-policy.md for what counts as breaking.
 
+## 0.8.1 — 2026-08-29
+
+### Fixed
+
+- Ship a PEP 561 `py.typed` marker. Without it, a consumer running mypy against
+  this library is told it has no type information, and every import from it
+  fails as `import-not-found` — despite the library being `mypy --strict` clean
+  itself. `telemetry-parser` hit this the moment it took its first dependency
+  on this package. The marker is what makes the types usable by anyone other
+  than this repository.
+
 ## 0.8.0 — 2026-08-29
 
 ### Added

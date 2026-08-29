@@ -4,7 +4,7 @@
 
 `event-schema-contracts` defines the authoritative, versioned event schemas shared across every SignalForge service — parsers, the streaming analytics control plane, feature pipelines, dataset exporters, alert routing, and replay workflows. It is the schema authority layer: no service defines event schemas independently of this repository.
 
-**Current version:** `v0.8.0`. Backward-compatible within the `v0` line; while the major version is 0, a breaking change bumps the minor (see the schema-evolution policy below). See [CHANGELOG.md](CHANGELOG.md) for what each version says.
+**Current version:** `v0.8.1`. Backward-compatible within the `v0` line; while the major version is 0, a breaking change bumps the minor (see the schema-evolution policy below). See [CHANGELOG.md](CHANGELOG.md) for what each version says.
 
 ---
 
@@ -28,7 +28,7 @@ It defines the compatibility boundary between ingestion, parsing, streaming anal
 Install a pinned schema version — pinning is what gives downstream services deterministic replay and dataset reproducibility:
 
 ```
-pip install "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.0"
+pip install "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.1"
 ```
 
 Pin a tag, never a branch. A tag resolves to one immutable commit, which is what
