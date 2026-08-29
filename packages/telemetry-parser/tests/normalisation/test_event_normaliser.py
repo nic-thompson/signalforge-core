@@ -43,7 +43,7 @@ def test_registered_status_maps_to_sip_registration():
 
     event = normalise(normaliser, extracted)
 
-    assert event.event_type == "sip.registration"
+    assert event.metadata.event_type == "sip.registration"
 
 
 def test_every_event_is_a_sip_registration():
@@ -55,7 +55,7 @@ def test_every_event_is_a_sip_registration():
 
     event = normalise(EventNormaliser(store_id=STORE_ID), make_extracted())
 
-    assert event.event_type == "sip.registration"
+    assert event.metadata.event_type == "sip.registration"
 
 
 def test_normaliser_no_longer_chooses_an_event_type():
@@ -72,10 +72,13 @@ def test_event_type_never_uses_device_prefix():
     normaliser = EventNormaliser(store_id=STORE_ID)
 
     registered = normalise(normaliser, make_extracted(registration_status="registered"))
-    unknown = normalise(normaliser, make_extracted(registration_status=None))
 
-    assert not registered.event_type.startswith("device.")
-    assert not unknown.event_type.startswith("device.")
+    assert not registered.metadata.event_type.startswith("device.")
+
+    # This used to also pass registration_status=None, covering the
+    # "sip.unknown" branch. The extractor now rejects those messages
+    # before the normaliser sees them and the field is not optional, so
+    # there is no second identity left to guard against.
 
 
 # ---------------------------------------------------------------
@@ -104,7 +107,7 @@ def test_payload_carries_no_removed_fields():
     payload = normalise(EventNormaliser(store_id=STORE_ID), make_extracted()).payload
 
     for removed in ("latency", "retry_count", "session_duration"):
-        assert removed not in payload
+        assert removed not in type(payload).model_fields
 
 
 # ---------------------------------------------------------------
@@ -115,7 +118,7 @@ def test_payload_carries_no_removed_fields():
 def test_payload_carries_the_configured_store_id():
     payload = normalise(EventNormaliser(store_id="store-0042"), make_extracted()).payload
 
-    assert payload["store_id"] == "store-0042"
+    assert payload.store_id == "store-0042"
 
 
 def test_store_id_is_independent_of_the_message():
@@ -131,8 +134,8 @@ def test_store_id_is_independent_of_the_message():
     first = normalise(EventNormaliser(store_id="store-0001"), extracted).payload
     second = normalise(EventNormaliser(store_id="store-0002"), extracted).payload
 
-    assert first["store_id"] == "store-0001"
-    assert second["store_id"] == "store-0002"
+    assert first.store_id == "store-0001"
+    assert second.store_id == "store-0002"
 
 
 def test_store_id_is_required():
@@ -181,8 +184,9 @@ def test_payload_uses_device_label_not_device_id():
 
     payload = normalise(EventNormaliser(store_id=STORE_ID), make_extracted()).payload
 
-    assert "device_label" in payload
-    assert "device_id" not in payload
+    assert payload.device_label == "headset-0001"
+    # device_id is present, but it is a derived UUID rather than the label.
+    assert payload.device_id != payload.device_label
 
 
 def test_device_labels_can_collide_across_stores():
@@ -196,8 +200,8 @@ def test_device_labels_can_collide_across_stores():
     bristol = normalise(EventNormaliser(store_id="store-bristol"), extracted).payload
     leeds = normalise(EventNormaliser(store_id="store-leeds"), extracted).payload
 
-    assert bristol["device_label"] == leeds["device_label"]
-    assert bristol["store_id"] != leeds["store_id"]
+    assert bristol.device_label == leeds.device_label
+    assert bristol.store_id != leeds.store_id
 
 
 @pytest.mark.parametrize("removed", ["replay_mode", "preserve_event_ids"])

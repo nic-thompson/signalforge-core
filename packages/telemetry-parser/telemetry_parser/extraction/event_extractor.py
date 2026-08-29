@@ -54,6 +54,17 @@ class EventExtractor:
                 )
             return None
 
+        # A REGISTER whose From header carries no user part names no
+        # device. Device identity is derived from (store_id,
+        # device_label), so without the label there is nothing to
+        # identify and no event worth emitting.
+        if message.device_label is None:
+            if self.observer:
+                self.observer.on_parse_error(
+                    "register_missing_device_label",
+                )
+            return None
+
         return ExtractedEventFields(
             device_label=message.device_label,
             registration_status=registration_status,

@@ -193,7 +193,7 @@ def test_store_id_reaches_the_emitted_payload():
         )
     )
 
-    assert events[0].payload["store_id"] == "store-0042"
+    assert events[0].payload.store_id == "store-0042"
 
 
 def test_pipeline_refuses_to_start_without_a_store_id():
@@ -201,3 +201,118 @@ def test_pipeline_refuses_to_start_without_a_store_id():
 
     with pytest.raises(ValueError):
         ParserPipeline(store_id="")
+
+
+# ---------------------------------------------------------------
+# the parser emits the contract type, validated
+# ---------------------------------------------------------------
+
+# These are the assertions that replace a whole class of downstream
+# surprise. Before this, the parser produced a dict[str, Any] that no
+# schema checked, and every mismatch below was found by reading the two
+# repositories side by side rather than by anything failing.
+
+
+def test_pipeline_emits_a_validated_contract_event():
+    from event_schema_contracts.telemetry.sip_registration_event import (
+        SipRegistrationEvent,
+    )
+
+    events = list(
+        ParserPipeline(store_id=STORE_ID).parse_stream(
+            [packet(register_message(), 1000, CAPTURED_AT)]
+        )
+    )
+
+    assert isinstance(events[0], SipRegistrationEvent)
+
+
+def test_emitted_event_declares_its_own_identity():
+    """
+    ADR-002 in aws-event-pipeline-infra: the publisher passes the
+    envelope dump as `detail` and adds nothing, because the identity is
+    already in `metadata`. That is only true if the parser puts it there.
+    """
+
+    event = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(), 1000, CAPTURED_AT)]
+            )
+        )
+    )
+
+    assert event.metadata.event_type == "sip.registration"
+    assert event.metadata.schema_version == "v1"
+
+
+def test_source_is_declared_not_defaulted():
+    """
+    BaseEvent defaults metadata.source to "unknown", which satisfies the
+    field's pattern and is therefore indistinguishable downstream from a
+    producer that genuinely declared itself unknown. Every event this
+    parser emits must name it.
+    """
+
+    event = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(), 1000, CAPTURED_AT)]
+            )
+        )
+    )
+
+    assert event.metadata.source == "telemetry-parser"
+
+
+def test_device_id_is_derived_from_store_and_label():
+    from event_schema_contracts.base.identity import derive_device_id
+
+    event = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(device="headset-12"), 1000, CAPTURED_AT)]
+            )
+        )
+    )
+
+    assert event.payload.device_id == derive_device_id(STORE_ID, "headset-12")
+
+
+def test_conversions_the_payload_dict_used_to_leave_implicit():
+    """
+    Each of these was a real mismatch found by inspection rather than by
+    a failure: a lowercase status, a raw Via token, and Call-ID under a
+    name that reads as call telemetry.
+    """
+
+    from event_schema_contracts.telemetry.sip_registration_event import (
+        RegistrationStatus,
+        SipTransportProtocol,
+    )
+
+    event = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(call_id="abc123"), 1000, CAPTURED_AT)]
+            )
+        )
+    )
+
+    assert event.payload.registration_status is RegistrationStatus.REGISTERED
+    assert event.payload.transport_protocol is SipTransportProtocol.TCP
+    assert event.payload.registration_call_id == "abc123@10.0.0.5"
+
+
+def test_pipeline_stage_is_ingestion():
+    from event_schema_contracts.base.trace import PipelineStage
+
+    event = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(), 1000, CAPTURED_AT)]
+            )
+        )
+    )
+
+    assert event.trace.pipeline_stage is PipelineStage.INGESTION

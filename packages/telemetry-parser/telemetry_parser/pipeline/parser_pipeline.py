@@ -1,4 +1,5 @@
 from typing import Iterable, Iterator
+from uuid import UUID
 
 from telemetry_parser.observability.parser_observer import ParserObserver
 from telemetry_parser.stream.tcp_reassembler import TCPReassembler, TCPPacket
@@ -7,7 +8,9 @@ from telemetry_parser.protocol.sip_parser import SIPParser
 from telemetry_parser.extraction.event_extractor import EventExtractor, UnsupportedProtocolEvent
 from telemetry_parser.normalisation.event_normaliser import EventNormaliser
 from telemetry_parser.output.event_emitter import EventEmitter
-from telemetry_parser.output.structured_event import StructuredEvent
+from event_schema_contracts.telemetry.sip_registration_event import (
+    SipRegistrationEvent,
+)
 
 
 class ParserPipeline:
@@ -59,8 +62,8 @@ class ParserPipeline:
     def parse_stream(
         self,
         packets: Iterable[TCPPacket],
-        trace_id: str | None = None,
-    ) -> Iterator[StructuredEvent]:
+        trace_id: UUID | None = None,
+    ) -> Iterator[SipRegistrationEvent]:
         """
         Parses a TCP packet stream into structured telemetry events.
 

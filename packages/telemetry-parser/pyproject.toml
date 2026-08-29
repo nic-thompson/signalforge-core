@@ -6,7 +6,9 @@ requires-python = ">=3.11"
 authors = [
     { name = "Nicolas" }
 ]
-dependencies = []
+dependencies = [
+    "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.1",
+]
 
 [project.optional-dependencies]
 dev = [

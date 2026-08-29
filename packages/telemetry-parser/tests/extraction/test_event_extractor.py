@@ -113,13 +113,14 @@ def test_non_standard_headers_are_ignored(extractor):
 
 def test_extract_with_optional_headers_absent_keeps_required_fields(extractor):
     """
-    Everything optional may be absent. CSeq may not: without it the
-    message contradicts its own request line and is rejected below.
+    Everything optional may be absent. Two things may not: CSeq, without
+    which the message contradicts its own request line, and the From
+    header's user part, without which the message names no device.
     """
 
     msg = make_register_message(
         headers={"cseq": "1 REGISTER"},
-        device_label=None,
+        device_label="headset-12",
         call_id=None,
         transport=None,
         source_ip=None,
@@ -128,7 +129,7 @@ def test_extract_with_optional_headers_absent_keeps_required_fields(extractor):
     result = extractor.extract(msg)
 
     assert result is not None
-    assert result.device_label is None
+    assert result.device_label == "headset-12"
     assert result.call_id is None
     assert result.transport_protocol is None
     assert result.source_ip is None
@@ -211,3 +212,29 @@ def test_extract_raises_for_options_method(extractor):
 
     with pytest.raises(UnsupportedProtocolEvent):
         extractor.extract(msg)
+
+
+def test_register_without_a_device_label_is_rejected(extractor):
+    """
+    Device identity is derived from (store_id, device_label). A REGISTER
+    whose From header carries no user part has nothing to derive from, so
+    there is no device to attribute the event to and no event worth
+    emitting.
+    """
+
+    result = extractor.extract(
+        make_register_message(headers={"cseq": "1 REGISTER"}, device_label=None)
+    )
+
+    assert result is None
+
+
+def test_missing_device_label_is_reported_to_the_observer():
+    observer = MagicMock()
+    extractor = EventExtractor(observer=observer)
+
+    extractor.extract(
+        make_register_message(headers={"cseq": "1 REGISTER"}, device_label=None)
+    )
+
+    observer.on_parse_error.assert_called_once_with("register_missing_device_label")

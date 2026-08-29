@@ -1,10 +1,18 @@
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 from unittest.mock import MagicMock
 
 import pytest
 
 from telemetry_parser.pipeline.parser_pipeline import ParserPipeline
-from telemetry_parser.output.structured_event import StructuredEvent
+from event_schema_contracts.base.identity import derive_device_id
+from event_schema_contracts.base.metadata import EventMetadata
+from event_schema_contracts.base.trace import PipelineStage, TraceContext
+from event_schema_contracts.telemetry.sip_registration_event import (
+    RegistrationStatus,
+    SipRegistrationEvent,
+    SipRegistrationPayload,
+)
 from telemetry_parser.stream.observation import (
     TimestampedChunk,
     TimestampedMessage,
@@ -39,20 +47,35 @@ class DummyExtracted:
     pass
 
 
-def make_structured_event() -> StructuredEvent:
+def make_structured_event() -> SipRegistrationEvent:
     """
-    Creates a minimal valid StructuredEvent for testing.
+    A minimal valid event for wiring tests.
+
+    Note that "minimal" now means every required field, correctly typed —
+    the previous version passed an empty payload dict, which the schema
+    would reject. That the fixture has to be this specific is the point
+    of the change it tests.
     """
 
-    return StructuredEvent(
-        schema_version="v1",
-        event_id="event-1",
-        trace_id="trace-1",
-        event_timestamp=datetime.now(timezone.utc),
-        ingest_timestamp=datetime.now(timezone.utc),
-        event_type="sip.registration",
-        source="test",
-        payload={},
+    now = datetime.now(timezone.utc)
+
+    return SipRegistrationEvent(
+        event_id=uuid4(),
+        event_timestamp=now,
+        ingest_timestamp=now,
+        trace=TraceContext(trace_id=uuid4(), pipeline_stage=PipelineStage.INGESTION),
+        metadata=EventMetadata(
+            event_type=SipRegistrationEvent.__event_type__,
+            schema_version=SipRegistrationEvent.__schema_version__,
+            source="test",
+        ),
+        payload=SipRegistrationPayload(
+            device_id=derive_device_id(STORE_ID, "headset-12"),
+            device_label="headset-12",
+            store_id=STORE_ID,
+            registration_status=RegistrationStatus.REGISTERED,
+            observed_at=now,
+        ),
     )
 
 

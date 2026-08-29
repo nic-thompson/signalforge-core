@@ -1,35 +1,47 @@
+import re
 import uuid
 from datetime import datetime
-from typing import Dict, Any
+from ipaddress import ip_address
+
+from event_schema_contracts.base.identity import derive_device_id
+from event_schema_contracts.base.metadata import EventMetadata
+from event_schema_contracts.base.trace import PipelineStage, TraceContext
+from event_schema_contracts.telemetry.sip_registration_event import (
+    STORE_ID_PATTERN,
+    RegistrationStatus,
+    SipRegistrationEvent,
+    SipRegistrationPayload,
+    SipTransportProtocol,
+)
 
 from telemetry_parser.extraction.field_mapper import ExtractedEventFields
 from telemetry_parser.observability.parser_observer import ParserObserver
-from telemetry_parser.output.structured_event import StructuredEvent
 from telemetry_parser.normalisation.timestamp_utils import TimestampUtils
 
 
 class EventNormaliser:
     """
-    Converts extracted telemetry attributes into schema-versioned structured events.
+    Converts extracted telemetry attributes into validated domain events.
 
-    Compatible with:
-    - analytics ingestion pipelines
-    - feature stores
-    - replay pipelines
-    - dataset export workflows
+    Produces ``SipRegistrationEvent`` from ``event-schema-contracts``
+    rather than a locally-defined envelope. That library owns the event
+    schemas; constructing its types here means the schema validates this
+    parser's output at the moment it is produced, instead of a downstream
+    component discovering a mismatch — or not discovering it.
+
+    The conversions below are the ones a hand-built payload dictionary
+    left implicit, and each was a real defect waiting to happen: a status
+    in the wrong case, a transport token the enum does not accept, a
+    device label sitting in a field named for an identifier. A
+    ``dict[str, Any]`` accepts all of them silently. ``SipRegistrationPayload``
+    accepts none.
     """
 
-    DEFAULT_SCHEMA_VERSION = "v1"
-    DEFAULT_SOURCE = "telemetry-parser"
+    SOURCE = "telemetry-parser"
 
-    # A constant rather than a choice. This used to select between
-    # "sip.registration" and "sip.unknown", but the extractor now rejects
-    # the malformed messages that produced the latter, so there is one
-    # event type. "sip.registration" rather than "device.registration":
-    # that identity was already registered by event-schema-contracts for
-    # device provisioning, a different domain with an incompatible field
-    # set. See event-schema-contracts ADR-002.
-    EVENT_TYPE = "sip.registration"
+    # This parser observes traffic at the ingestion boundary, so every
+    # event it produces enters the pipeline at that stage.
+    PIPELINE_STAGE = PipelineStage.INGESTION
 
     def __init__(
         self,
@@ -63,8 +75,8 @@ class EventNormaliser:
         self,
         extracted: ExtractedEventFields,
         observed_at: datetime,
-        trace_id: str | None = None,
-    ) -> StructuredEvent:
+        trace_id: uuid.UUID | None = None,
+    ) -> SipRegistrationEvent:
         """
         Parameters
         ----------
@@ -83,59 +95,90 @@ class EventNormaliser:
             observed_at
         )
 
-        ingest_timestamp = TimestampUtils.ingest_timestamp()
-
-        event_id = str(uuid.uuid4())
-
-        resolved_trace_id = (
-            trace_id if trace_id is not None else str(uuid.uuid4())
-        )
-
-        payload = self._build_payload(extracted)
-
-        return StructuredEvent(
-            schema_version=self.DEFAULT_SCHEMA_VERSION,
-            event_id=event_id,
-            trace_id=resolved_trace_id,
+        return SipRegistrationEvent(
+            event_id=uuid.uuid4(),
             event_timestamp=event_timestamp,
-            ingest_timestamp=ingest_timestamp,
-            event_type=self.EVENT_TYPE,
-            source=self.DEFAULT_SOURCE,
-            payload=payload,
+            ingest_timestamp=TimestampUtils.ingest_timestamp(),
+            trace=TraceContext(
+                trace_id=trace_id if trace_id is not None else uuid.uuid4(),
+                pipeline_stage=self.PIPELINE_STAGE,
+            ),
+            # Supplied rather than left to BaseEvent.inject_metadata, which
+            # defaults source to "unknown" — a value that satisfies the
+            # field's own pattern and is therefore indistinguishable
+            # downstream from a producer that genuinely declared itself
+            # unknown. event_type and schema_version come from the class,
+            # so they cannot disagree with the schema being constructed.
+            metadata=EventMetadata(
+                event_type=SipRegistrationEvent.__event_type__,
+                schema_version=SipRegistrationEvent.__schema_version__,
+                source=self.SOURCE,
+            ),
+            payload=self._build_payload(extracted, event_timestamp),
         )
 
     def _build_payload(
         self,
         extracted: ExtractedEventFields,
-    ) -> Dict[str, Any]:
+        observed_at: datetime,
+    ) -> SipRegistrationPayload:
+        """
+        Every field here is a conversion, not a copy.
 
-        return {
-            "store_id": self.store_id,
-            "device_label": extracted.device_label,
-            "registration_status": extracted.registration_status,
-            "transport_protocol": extracted.transport_protocol,
-            "call_id": extracted.call_id,
-            "source_ip": extracted.source_ip,
-        }
+        - ``device_id`` is derived, not parsed. Nothing in a REGISTER
+          carries a device identifier; the label it does carry is unique
+          only within a store. See event-schema-contracts ADR-002.
+        - ``registration_status`` is uppercased into the enum. The parser
+          works in lowercase because that is what its own mapper returns.
+        - ``transport_protocol`` comes off the Via header as a raw token.
+          The enum accepts TCP, UDP and TLS; anything else raises here,
+          at the boundary, rather than being carried onward.
+        - ``registration_call_id`` renames ``call_id``. On a REGISTER,
+          SIP ``Call-ID`` identifies the registration transaction and not
+          a voice call, and the short name reads as call telemetry.
+        - ``observed_at`` duplicates the envelope's ``event_timestamp``.
+          The schema wants observation time on the payload so a consumer
+          holding only the payload can still date it.
+        """
+
+        return SipRegistrationPayload(
+            device_id=derive_device_id(self.store_id, extracted.device_label),
+            device_label=extracted.device_label,
+            store_id=self.store_id,
+            registration_status=RegistrationStatus(
+                extracted.registration_status.upper()
+            ),
+            observed_at=observed_at,
+            transport_protocol=(
+                SipTransportProtocol(extracted.transport_protocol.upper())
+                if extracted.transport_protocol is not None
+                else None
+            ),
+            # Converted here rather than left to pydantic's coercion, so
+            # a malformed address fails in the parser — where the Via
+            # header it came from is still in scope — instead of inside
+            # schema validation.
+            source_ip=(
+                ip_address(extracted.source_ip)
+                if extracted.source_ip is not None
+                else None
+            ),
+            registration_call_id=extracted.call_id,
+        )
 
     @staticmethod
     def _validate_store_id(store_id: str) -> str:
         """
-        Rejects a store identity that is missing or malformed enough to be
-        certainly a misconfiguration.
+        Rejects a store identity the schema would reject, at construction.
 
-        This deliberately stops short of the full grammar that
-        ``sip.registration v1`` enforces. This parser does not depend on
-        ``event-schema-contracts``, so it cannot import that pattern, and
-        copying the regex here would create a second definition free to
-        drift from the first — which is the failure this whole line of work
-        has been unpicking. The authoritative check belongs at the ingestion
-        boundary, which owns the contract.
+        This used to check only for a blank value, with a comment
+        explaining that the parser could not import the real grammar. It
+        can now: ``STORE_ID_PATTERN`` is the schema's own constant, so
+        there is one definition rather than a copy free to drift from it.
 
-        What is caught here is the case worth catching early: an unset or
-        blank configuration value. A controller with no store identity
-        should refuse to start rather than emit a stream of events that are
-        rejected one at a time, far from the cause.
+        Checking at construction rather than per event means a controller
+        with a malformed store identity refuses to start, instead of
+        emitting a stream rejected one event at a time far from the cause.
         """
 
         if not isinstance(store_id, str) or not store_id.strip():
@@ -144,9 +187,14 @@ class EventNormaliser:
                 "it comes from the controller's provisioned configuration"
             )
 
-        if store_id != store_id.strip() or any(c.isspace() for c in store_id):
+        # fullmatch, not match: Python's ``$`` also matches before a
+        # trailing newline, so re.match would accept "store-1\\n" while
+        # the schema rejects it. The point of importing the pattern is
+        # to agree with the schema exactly.
+        if not re.fullmatch(STORE_ID_PATTERN, store_id):
             raise ValueError(
-                f"store_id must not contain whitespace, got {store_id!r}"
+                f"store_id does not satisfy the sip.registration grammar "
+                f"({STORE_ID_PATTERN}): {store_id!r}"
             )
 
         return store_id

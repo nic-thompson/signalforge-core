@@ -18,8 +18,13 @@ class ExtractedEventFields:
     # The From header's user part: a name the device was configured
     # with, not an identifier this system issued. It is unique only
     # within a store, which is why the stable device identity is
-    # derived downstream from (store_id, device_label).
-    device_label: str | None
+    # derived from (store_id, device_label).
+    #
+    # Not optional. A REGISTER with no user part in its From header
+    # cannot be attributed to a device at all — there is nothing to
+    # derive an identity from — so the extractor rejects it rather than
+    # producing an event that names no device.
+    device_label: str
     # Not optional. A REGISTER whose CSeq does not agree with its request
     # line is malformed and is rejected during extraction, so if one of
     # these exists at all, it describes a registration.
