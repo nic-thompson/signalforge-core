@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
-from uuid import NAMESPACE_DNS, uuid1, uuid4, uuid5
+from uuid import uuid1, uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from event_schema_contracts.base.identity import derive_device_id
 from event_schema_contracts.telemetry.sip_registration_event import (
     EVENT_TYPE,
     SCHEMA_VERSION_V1,
@@ -15,17 +16,9 @@ from event_schema_contracts.telemetry.sip_registration_event import (
 from event_schema_contracts.versioning.schema_registry import schema_registry
 
 
-NAMESPACE = uuid5(NAMESPACE_DNS, "signalforge.analytics")
-
-
-def derived_device_id(store_id: str, device_label: str):
-    """Mirrors signal_forge.identity.derive for test purposes."""
-    return uuid5(NAMESPACE, f"device|{store_id}|{device_label}")
-
-
 def minimal_payload(**overrides):
     fields = {
-        "device_id": derived_device_id("store-1", "headset-0001"),
+        "device_id": derive_device_id("store-1", "headset-0001"),
         "device_label": "headset-0001",
         "store_id": "store-1",
         "registration_status": RegistrationStatus.REGISTERED,
@@ -53,7 +46,7 @@ def test_minimal_payload_valid_with_only_required_fields():
 )
 def test_required_fields_rejected_when_absent(missing):
     fields = {
-        "device_id": derived_device_id("store-1", "headset-0001"),
+        "device_id": derive_device_id("store-1", "headset-0001"),
         "device_label": "headset-0001",
         "store_id": "store-1",
         "registration_status": RegistrationStatus.REGISTERED,
@@ -70,7 +63,7 @@ def test_required_fields_rejected_when_absent(missing):
 
 
 def test_device_id_accepts_derived_uuid_v5():
-    device_id = derived_device_id("store-1", "headset-0001")
+    device_id = derive_device_id("store-1", "headset-0001")
     assert device_id.version == 5
     assert minimal_payload(device_id=device_id).device_id == device_id
 
@@ -88,14 +81,14 @@ def test_device_id_rejects_uuid_v1():
 
 def test_derivation_is_stable_across_calls():
     """The property replay determinism depends on."""
-    assert derived_device_id("store-1", "headset-0001") == derived_device_id(
+    assert derive_device_id("store-1", "headset-0001") == derive_device_id(
         "store-1", "headset-0001"
     )
 
 
 def test_same_label_in_different_stores_yields_different_ids():
     """Labels are only unique within a store, so the store must be part of the derivation."""
-    assert derived_device_id("store-1", "headset-0001") != derived_device_id(
+    assert derive_device_id("store-1", "headset-0001") != derive_device_id(
         "store-2", "headset-0001"
     )
 

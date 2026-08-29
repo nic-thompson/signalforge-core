@@ -12,6 +12,39 @@ first with an entry here.
 While the major version is 0, a breaking change bumps the minor. See
 docs/compatibility-policy.md for what counts as breaking.
 
+## 0.8.0 — 2026-08-29
+
+### Added
+
+- `event_schema_contracts.base.identity.derive(role, *parts)` and
+  `derive_device_id(store_id, device_label)`, with the frozen project
+  `NAMESPACE`. The UUIDv5 derivation that produces `sip.registration`'s
+  `device_id` previously existed only as a helper inside this library's own
+  test file, and as an independent implementation in `signal-forge`. Two
+  definitions of the same derivation, with nothing comparing them: had either
+  drifted, the same physical device would have resolved to two identities and
+  every join across them would have silently split.
+
+  The published version is byte-identical to both. `base/identity.py` already
+  owned the UUID *version* policy — which fields may hold a derived id — so it
+  now also owns how one is produced.
+
+  The namespace, the separator and every role string are frozen; changing any
+  re-bases every derived id in the system. Tests pin all three against
+  hardcoded literals, because asserting the derivation against its own inputs
+  would pass even if those inputs changed.
+
+### Changed
+
+- This library's `sip.registration` tests import `derive_device_id` rather than
+  defining their own. The ids are unchanged.
+
+### Notes for consumers
+
+- `signal-forge` still carries its own `signal_forge.identity`. The two agree
+  today; the durable fix is for it to import this one, which is a change to
+  that repository and not yet made.
+
 ## 0.7.0 — 2026-08-25
 
 First version cut by the release workflow, and the first with a changelog entry.
