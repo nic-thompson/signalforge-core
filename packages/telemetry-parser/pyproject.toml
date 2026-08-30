@@ -16,6 +16,18 @@ dev = [
     "mypy>=1.10",
 ]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# PEP 561. Without py.typed shipped in the wheel, a consumer running mypy
+# is told this package has no type information and every import from it
+# fails as import-untyped — despite the package being mypy --strict clean
+# itself. event-schema-contracts hit the identical gap; this repository
+# found it the moment something depended on it in turn.
+[tool.setuptools.package-data]
+telemetry_parser = ["py.typed"]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
