@@ -161,7 +161,7 @@ replay-isolated bucket. Object *keys* were already identity-independent
 required the previously-`uuid4` identity fields — `detection_id`,
 `source_event_id`, and the envelope `event_id` on detections and features —
 to be made deterministic. These are now derived via UUIDv5 from stable
-coordinates (`signal_forge.identity.derive`), so the serialised bytes carry
+coordinates (`event_schema_contracts.base.identity.derive`), so the serialised bytes carry
 no per-run randomness. The row sort already used replay-deterministic
 columns only, so byte-identity followed from the identity change without
 touching serialisation. The integration test runs one event sequence through
@@ -209,7 +209,7 @@ but live elsewhere:
 - **No identity minting.** The dataset layer serialises the identity fields
   the events already carry; it does not generate them. Their determinism is
   owned by the detectors and the feature-bundling path via
-  `signal_forge.identity`.
+  `event_schema_contracts.base.identity`.
 
 ## Cross-references
 
@@ -234,7 +234,7 @@ but live elsewhere:
   construction, and the no-op-when-unconfigured behaviour.
 - `signal_forge/config/platform_settings.py` — the `dataset_bucket` /
   `replay_dataset_bucket` fields and `for_replay()`.
-- `signal_forge/identity.py` — the UUIDv5 derivation that makes replay
+- `event_schema_contracts.base.identity` — the UUIDv5 derivation that makes replay
   byte-identity possible.
 - `tests/datasets/test_replay_isolation.py` and
   `tests/datasets/test_schema_evolution.py` — the replay-byte-identity and

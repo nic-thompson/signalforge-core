@@ -28,7 +28,7 @@ from datetime import UTC, datetime, timedelta
 
 from signal_forge.alerts.acknowledgement_registry import AcknowledgementRegistry
 from signal_forge.alerts.alert_router import AlertRouter
-from signal_forge.identity import derive
+from event_schema_contracts.base.identity import derive
 from signal_forge.streaming.event_router import EventRouter
 from signal_forge.streaming.realtime_pipeline import (
     RealtimePipeline,

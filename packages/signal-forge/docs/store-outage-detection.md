@@ -80,7 +80,7 @@ A store-outage detection is a `DetectionEvent` with:
 
 ### Identity is replay-deterministic
 
-`detection_id`, `source_event_id`, and the envelope `event_id` are derived via the `signal_forge.identity` helper (`derive(role, *parts)`, UUIDv5) from stable coordinates — the store_id and window bounds — not minted as `uuid4`. Two runs over the same emission sequence produce byte-identical identities, which is what lets the Phase 4 dataset layer assert byte-identical Parquet across live and replay, and what lets Phase 5 derive a stable alert key from `detection_id`. (This is the post-Phase-4 behaviour; the detector's identity was `uuid4`-based through Phases 2–3 and was made deterministic when the dataset layer's replay byte-identity test required it.)
+`detection_id`, `source_event_id`, and the envelope `event_id` are derived via `event_schema_contracts.base.identity.derive(role, *parts)` (UUIDv5) from stable coordinates — the store_id and window bounds — not minted as `uuid4`. Two runs over the same emission sequence produce byte-identical identities, which is what lets the Phase 4 dataset layer assert byte-identical Parquet across live and replay, and what lets Phase 5 derive a stable alert key from `detection_id`. (This is the post-Phase-4 behaviour; the detector's identity was `uuid4`-based through Phases 2–3 and was made deterministic when the dataset layer's replay byte-identity test required it.)
 
 The trace is propagated from the emission's `last_contributing_trace_id` — the most-recent contributing event's trace — so an operator looking at a store-outage detection can chase the trace backwards to the events that produced the window. If the emission carries no trace (unreachable through the public pipeline API, kept as defensive code), a fresh trace is minted.
 
@@ -109,4 +109,4 @@ The trace is propagated from the emission's `last_contributing_trace_id` — the
 - `docs/roadmap.md` — Phase 5 alert routing (the consumer of these detections, where `CRITICAL` becomes a page) and Phase 6 dashboard projections (cross-detection correlation).
 - `signal_forge/detection/detectors/outage_detector.py` — the implementation.
 - `signal_forge/detection/types.py` — the `DETECTION_TYPE_STORE_OUTAGE` constant.
-- `signal_forge/identity.py` — the `derive` helper backing replay-deterministic detection identity.
+- `event_schema_contracts.base.identity` — the `derive` helper backing replay-deterministic detection identity. It lived in `signal_forge/identity.py` until August 2026, when it was published upstream so the schema library and its consumers share one definition rather than two that happen to agree.

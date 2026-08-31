@@ -1,21 +1,33 @@
 """
-Tests for signal_forge.identity and the deterministic identity fields it
-produces at the detection construction sites.
+Tests for the deterministic identity fields produced at the detection
+construction sites, and for this project's expectations of the derivation
+they use.
 
-Covers:
+The derivation itself now lives in event-schema-contracts. It was
+implemented here first — Phase 4 needed replay-deterministic ids before
+the schema library had anything to offer — and independently in that
+library's own test fixtures, which is two definitions of one derivation
+with nothing comparing them. They agreed, but nothing made them agree:
+had either drifted, the same logical record would have resolved to two
+ids and every join across them would have split silently.
 
-- the derive() helper: DNS-derived frozen namespace, stability, UUIDv5
-  version, role- and parts-distinctness
+DeriveHelperTest is kept even though the library tests its own function,
+because these are a consumer's assertions rather than duplicates. If a
+future version re-based the namespace, every id this project has ever
+produced would change, and the replay byte-identity guarantee would
+break. Asserting it here catches that when the dependency is bumped
+rather than when a dataset comparison fails.
+
+The rest covers this project's own behaviour:
+
 - OfflineDetector, OutageDetector, AnomalyDetector each produce the same
   detection_id / source_event_id / envelope event_id when fed identical
   (stable) coordinates across two independent runs
 - the envelope event_id and the detection_id differ (role separation)
 - different windows / devices yield different detection ids
 
-These prove the mechanism and the wiring. The full byte-identical
-live-vs-replay assertion over serialised Parquet is the Phase 4
-replay-isolation test (commit 9); this commit makes that achievable by
-removing uuid4 from the serialised identity fields.
+The full byte-identical live-vs-replay assertion over serialised Parquet
+is the Phase 4 replay-isolation test.
 """
 
 from __future__ import annotations
@@ -30,7 +42,7 @@ from signal_forge.detection.detectors import (
     OutageDetector,
 )
 from signal_forge.detection.device_registry import DeviceRegistry
-from signal_forge.identity import NAMESPACE, derive
+from event_schema_contracts.base.identity import NAMESPACE, derive
 from tests._fixtures.dataset import emission
 from tests._fixtures.events import FakeEvent
 from tests._fixtures.payloads import FakeDevicePayload

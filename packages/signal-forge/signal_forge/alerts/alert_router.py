@@ -58,7 +58,7 @@ from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection.detection_event import DetectionEvent
 
 from signal_forge.alerts.acknowledgement_registry import AcknowledgementRegistry
-from signal_forge.identity import derive
+from event_schema_contracts.base.identity import derive
 
 
 class AlertRouter:

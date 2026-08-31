@@ -31,7 +31,7 @@ from moto import mock_aws
 
 from signal_forge.alerts.eventbridge_alert_sink import EventBridgeAlertSink
 from signal_forge.config.platform_settings import PlatformSettings
-from signal_forge.identity import derive
+from event_schema_contracts.base.identity import derive
 
 _BUS = "sf-test-bus"
 _REGION = "us-east-1"

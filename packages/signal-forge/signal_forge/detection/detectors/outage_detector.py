@@ -13,7 +13,7 @@ detection (D-18, revisiting D-7).
 
 Replay-deterministic: same input emission sequence produces the same
 output detection sequence, including detection_id and source_event_id.
-Those identity fields are derived via signal_forge.identity.derive
+Those identity fields are derived via event_schema_contracts.base.identity.derive
 (UUIDv5 over stable coordinates - store_id and window bounds), not
 minted as uuid4, so two runs over the same emissions produce
 byte-identical identities. (They were uuid4-based through Phases 2-3
@@ -43,7 +43,7 @@ from signal_forge.detection.types import (
     DETECTION_TYPE_STORE_OUTAGE,
     DETECTION_TYPE_STORE_RECOVERED,
 )
-from signal_forge.identity import derive
+from event_schema_contracts.base.identity import derive
 from signal_forge.streaming.window_aggregator import WindowEmission
 
 # State machine: not_outage (implicit, store not in dict) -> outage.

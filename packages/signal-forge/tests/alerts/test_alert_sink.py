@@ -22,7 +22,7 @@ from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection.detection_event import DetectionSeverity
 
 from signal_forge.alerts.alert_sink import AlertSink, InMemoryAlertSink
-from signal_forge.identity import derive
+from event_schema_contracts.base.identity import derive
 
 
 def _alert(store_id: str = "store-1") -> AlertEvent:

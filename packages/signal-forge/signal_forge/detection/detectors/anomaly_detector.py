@@ -31,7 +31,7 @@ from event_schema_contracts.detection import (
 )
 
 from signal_forge.detection.types import DETECTION_TYPE_SIGNAL_ANOMALY
-from signal_forge.identity import derive
+from event_schema_contracts.base.identity import derive
 from signal_forge.streaming.window_aggregator import WindowEmission
 
 # State machine: not_anomalous (implicit, partition_key not in dict)

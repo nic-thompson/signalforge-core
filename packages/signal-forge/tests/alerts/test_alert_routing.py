@@ -30,7 +30,7 @@ from event_schema_contracts.detection.detection_event import (
 
 from signal_forge.alerts.acknowledgement_registry import AcknowledgementRegistry
 from signal_forge.alerts.alert_router import AlertRouter
-from signal_forge.identity import derive
+from event_schema_contracts.base.identity import derive
 
 
 def _utc_now() -> datetime:
