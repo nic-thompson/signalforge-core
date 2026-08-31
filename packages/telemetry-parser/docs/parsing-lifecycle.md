@@ -78,19 +78,28 @@ semantic attribute mapping
 
 Produces:
 
-device_id
+device_label
 registration_status
-latency
-retry_count
 transport_protocol
-session_duration
 call_id
 source_ip
-event_timestamp
 
 Output:
 
-ExtractedEventFields
+ExtractedEventFields, or None
+
+None is returned for a REGISTER that contradicts its own request line —
+a CSeq that is absent or names another method — or that carries no user
+part in its From header and so names no device. Both are reported to the
+observer rather than raised.
+
+latency, retry_count and session_duration were produced here until the
+edge producer contract was written. They read non-standard headers no
+document defines and no component emits. See ADR-001.
+
+event_timestamp is no longer extracted from the message. Event time comes
+from packet capture, which is the only trustworthy record of when a
+message was seen.
 
 ---
 
@@ -102,14 +111,18 @@ ExtractedEventFields
 
 Responsibilities:
 
-- schema version assignment
-- timestamp normalisation
-- event type mapping
-- payload structuring
+- device identity derivation from (store_id, device_label)
+- protocol values converted into the schema's enums and types
+- envelope construction, including the metadata that names the schema
 
 Output:
 
-StructuredEvent
+SipRegistrationEvent, validated on construction
+
+The event type is from event-schema-contracts rather than defined here.
+Constructing it means the schema checks this parser's output at the point
+it is produced, instead of a downstream component discovering a mismatch
+— or not discovering it.
 
 ---
 
@@ -117,7 +130,7 @@ StructuredEvent
 
 Input:
 
-StructuredEvent
+SipRegistrationEvent
 
 Responsibilities:
 
