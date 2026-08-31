@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
 from event_schema_contracts.alerts.alert_event import AlertEvent
+from event_schema_contracts.base.identity import derive
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import DetectionEvent
 from event_schema_contracts.features.windowed_feature_vector import (
@@ -62,7 +63,6 @@ from event_schema_contracts.features.windowed_feature_vector import (
 from signal_forge.alerts.alert_router import AlertRouter
 from signal_forge.detection.protocols import EmissionDetector, EventDetector
 from signal_forge.features import FEATURE_SCHEMA_VERSION
-from event_schema_contracts.base.identity import derive
 from signal_forge.streaming.event_protocol import TelemetryEvent
 from signal_forge.streaming.event_router import EventRouter
 from signal_forge.streaming.observability import StructuredLoggerLike, get_logger

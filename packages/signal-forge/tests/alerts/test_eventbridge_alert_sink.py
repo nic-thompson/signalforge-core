@@ -25,13 +25,13 @@ from event_schema_contracts.alerts.alert_event import (
     AlertEvent,
     AlertEventPayload,
 )
+from event_schema_contracts.base.identity import derive
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection.detection_event import DetectionSeverity
 from moto import mock_aws
 
 from signal_forge.alerts.eventbridge_alert_sink import EventBridgeAlertSink
 from signal_forge.config.platform_settings import PlatformSettings
-from event_schema_contracts.base.identity import derive
 
 _BUS = "sf-test-bus"
 _REGION = "us-east-1"

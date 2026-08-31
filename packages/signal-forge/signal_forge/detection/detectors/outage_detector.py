@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 from uuid import uuid4
 
+from event_schema_contracts.base.identity import derive
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import (
     DetectionEvent,
@@ -43,7 +44,6 @@ from signal_forge.detection.types import (
     DETECTION_TYPE_STORE_OUTAGE,
     DETECTION_TYPE_STORE_RECOVERED,
 )
-from event_schema_contracts.base.identity import derive
 from signal_forge.streaming.window_aggregator import WindowEmission
 
 # State machine: not_outage (implicit, store not in dict) -> outage.

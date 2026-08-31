@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Literal
 from uuid import uuid4
 
+from event_schema_contracts.base.identity import derive
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import (
     DetectionEvent,
@@ -31,7 +32,6 @@ from event_schema_contracts.detection import (
 )
 
 from signal_forge.detection.types import DETECTION_TYPE_SIGNAL_ANOMALY
-from event_schema_contracts.base.identity import derive
 from signal_forge.streaming.window_aggregator import WindowEmission
 
 # State machine: not_anomalous (implicit, partition_key not in dict)

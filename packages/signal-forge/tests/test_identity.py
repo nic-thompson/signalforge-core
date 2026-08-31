@@ -36,13 +36,14 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_DNS, UUID, uuid5
 
+from event_schema_contracts.base.identity import NAMESPACE, derive
+
 from signal_forge.detection.detectors import (
     AnomalyDetector,
     OfflineDetector,
     OutageDetector,
 )
 from signal_forge.detection.device_registry import DeviceRegistry
-from event_schema_contracts.base.identity import NAMESPACE, derive
 from tests._fixtures.dataset import emission
 from tests._fixtures.events import FakeEvent
 from tests._fixtures.payloads import FakeDevicePayload

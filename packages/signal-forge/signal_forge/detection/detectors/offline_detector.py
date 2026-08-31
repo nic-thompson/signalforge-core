@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import ClassVar, Literal
 from uuid import UUID
 
+from event_schema_contracts.base.identity import derive
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import (
     DetectionEvent,
@@ -29,7 +30,6 @@ from event_schema_contracts.detection import (
 )
 
 from signal_forge.detection.types import DETECTION_TYPE_DEVICE_OFFLINE, DETECTION_TYPE_DEVICE_ONLINE
-from event_schema_contracts.base.identity import derive
 from signal_forge.streaming.event_protocol import TelemetryEvent
 
 # State machine: unseen (implicit, not in the dict) -> seen -> offline.
