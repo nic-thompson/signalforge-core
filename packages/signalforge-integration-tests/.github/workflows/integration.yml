@@ -96,48 +96,65 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # No token on any of the three component checkouts. All are public,
+      # so actions/checkout's default token suffices.
+      #
+      # They were private, and each checkout passed
+      # token: ${{ secrets.COMPONENT_REPO_TOKEN }} — a secret that was
+      # never configured. An unset secret is not an absent input: it
+      # resolves to an empty string, and checkout rejects that with
+      # "Input required and not supplied: token". That is why this
+      # workflow failed on its first run on 21 August and every scheduled
+      # run since, reporting a setup error each morning while real
+      # breakage accumulated behind it unseen.
       - name: Checkout integration tests
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: integration
 
       - name: Checkout telemetry-parser
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: nic-thompson/telemetry-parser
           ref: ${{ steps.refs.outputs.telemetry_parser }}
-          token: ${{ secrets.COMPONENT_REPO_TOKEN }}
           path: telemetry-parser
 
       - name: Checkout structured-logging-python
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: nic-thompson/structured-logging-python
           ref: ${{ steps.refs.outputs.structured_logging }}
-          token: ${{ secrets.COMPONENT_REPO_TOKEN }}
           path: structured-logging-python
 
       - name: Checkout greengrass-publisher
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: nic-thompson/greengrass-publisher
           ref: ${{ steps.refs.outputs.greengrass_publisher }}
-          token: ${{ secrets.COMPONENT_REPO_TOKEN }}
           path: greengrass-publisher
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest
+      # Installed rather than joined onto PYTHONPATH. greengrass-publisher
+      # now declares event-schema-contracts as a dependency, which a
+      # PYTHONPATH entry would not bring in — the imports would resolve for
+      # the checked-out packages and fail for what they depend on. Installing
+      # the local checkouts keeps the ref-pinning above meaningful while
+      # letting pip resolve everything beneath them.
+      - name: Install components under test
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install ./telemetry-parser
+          python -m pip install ./structured-logging-python
+          python -m pip install ./greengrass-publisher
 
       - name: Run edge-chain integration tests
         working-directory: integration
-        env:
-          PYTHONPATH: ../telemetry-parser:../structured-logging-python:../greengrass-publisher:.
         run: pytest -v --tb=short
 
   notify-on-scheduled-failure:

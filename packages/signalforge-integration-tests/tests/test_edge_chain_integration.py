@@ -14,6 +14,7 @@ No AWS dependency: the publisher is wired to a fake IPC client.
 from __future__ import annotations
 
 import json
+from uuid import UUID
 
 import pytest
 
@@ -26,6 +27,11 @@ from fixtures.sip_register_fixtures import (
 )
 from greengrass_publisher.publisher import GreengrassEventPublisher, PublishError
 from telemetry_parser.pipeline.parser_pipeline import ParserPipeline
+
+# Fixed rather than generated, so assertions can compare against it.
+# parse_stream takes a UUID: it used to accept any string, and this was
+# "trace-integration-001" until TraceContext began validating the type.
+TRACE_ID = UUID("11111111-2222-3333-4444-555555555555")
 
 
 class FakeIPCClient:
@@ -54,11 +60,11 @@ def run_chain(
     """
     client = client or FakeIPCClient()
     publisher = GreengrassEventPublisher(store_id=store_id, ipc_client=client)
-    pipeline = ParserPipeline()
+    pipeline = ParserPipeline(store_id=store_id)
 
     packets = packets_from_messages(messages, fragment_size=fragment_size)
 
-    for event in pipeline.parse_stream(packets, trace_id="trace-integration-001"):
+    for event in pipeline.parse_stream(packets, trace_id=TRACE_ID):
         publisher.publish(event)
 
     return client
@@ -90,10 +96,19 @@ def test_published_payload_carries_extracted_sip_fields() -> None:
 
 
 def test_trace_id_propagates_from_pipeline_to_published_event() -> None:
+    """
+    The trace id given to parse_stream must reach the published JSON.
+
+    Two things about it changed with the move to contract types, and both
+    are the sort a consumer only discovers by running: it is a UUID
+    rather than an arbitrary string, and it is nested under `trace`
+    rather than sitting flat on the envelope.
+    """
+
     client = run_chain([HEALTHY_REGISTER])
     payload = decoded_payloads(client)[0]
 
-    assert payload["trace_id"] == "trace-integration-001"
+    assert payload["trace"]["trace_id"] == str(TRACE_ID)
 
 
 # --------------------------------------------------------------------
@@ -202,15 +217,24 @@ def test_publish_failure_surfaces_rather_than_silently_dropping() -> None:
 # --------------------------------------------------------------------
 
 
-def test_message_without_trailing_data_still_flushes() -> None:
+def test_complete_message_with_no_trailing_traffic_is_emitted() -> None:
     """
-    ParserPipeline flushes reassembler and decoder buffers at
-    end-of-stream. A message arriving with no subsequent traffic must
-    still be emitted rather than stranded in a buffer.
+    A complete message needs no flush. It carries its own header
+    terminator, so the decoder frames it on arrival rather than leaving
+    it buffered — and it is emitted whether or not further traffic
+    follows.
+
+    This test was named ...still_flushes and described end-of-stream
+    buffer flushing as what rescued it. That was never what happened
+    here, and flushing has since been removed: it joined reassembly
+    segments across gaps that never filled and framed remainders with no
+    terminator, fabricating events indistinguishable from real ones. The
+    pipeline now discards and reports those instead. The assertion below
+    is unchanged, because it never depended on the flush.
     """
     client = FakeIPCClient()
     publisher = GreengrassEventPublisher(store_id="store-0042", ipc_client=client)
-    pipeline = ParserPipeline()
+    pipeline = ParserPipeline(store_id="store-0042")
 
     packets = list(packets_from_payload(HEALTHY_REGISTER, fin=True))
 
@@ -232,9 +256,17 @@ def test_message_without_trailing_data_still_flushes() -> None:
 
 
 def _run_twice(messages: list[bytes]) -> tuple[list, list]:
+    """
+    Parses the same messages twice.
+
+    This used to pass replay_mode=True and preserve_event_ids=True.
+    Neither flag did anything — both guarded on fields
+    ExtractedEventFields has never carried — and both have been removed.
+    Determinism is no longer a mode to opt into.
+    """
     runs = []
     for _ in range(2):
-        pipeline = ParserPipeline(replay_mode=True, preserve_event_ids=True)
+        pipeline = ParserPipeline(store_id="store-0042")
         runs.append(
             list(pipeline.parse_stream(packets_from_messages(messages)))
         )
@@ -242,9 +274,11 @@ def _run_twice(messages: list[bytes]) -> tuple[list, list]:
 
 
 @pytest.mark.xfail(
-    reason="DEFECT-1: preserve_event_ids has no effect — ExtractedEventFields "
-    "has no event_id attribute, so the hasattr() guard in EventNormaliser "
-    "always falls through to uuid.uuid4()",
+    reason="DEFECT-1: event_id is still uuid.uuid4() per event. The "
+    "preserve_event_ids flag this originally blamed has been removed — it "
+    "never worked — but nothing replaced it. event-schema-contracts now "
+    "publishes derive(role, *parts), so deriving the id from replay-stable "
+    "coordinates is possible; it has not been done.",
     strict=True,
 )
 def test_event_ids_are_stable_across_replay() -> None:
@@ -253,13 +287,13 @@ def test_event_ids_are_stable_across_replay() -> None:
     assert [e.event_id for e in first] == [e.event_id for e in second]
 
 
-@pytest.mark.xfail(
-    reason="DEFECT-2: a REGISTER with no X-Timestamp header falls back to "
-    "datetime.now(), so event_timestamp differs on every run. The packet's "
-    "own capture timestamp is available but never passed as the fallback.",
-    strict=True,
-)
 def test_event_timestamps_are_stable_across_replay() -> None:
+    """
+    DEFECT-2, fixed. Event time now comes from the packet carrying a
+    message's first byte, with no fallback — the X-Timestamp header this
+    once preferred was never defined by anything, and the wall-clock
+    fallback beneath it made two parses of one capture differ.
+    """
     first, second = _run_twice([HEALTHY_REGISTER, SPARSE_REGISTER])
 
     assert [e.event_timestamp for e in first] == [
@@ -268,9 +302,11 @@ def test_event_timestamps_are_stable_across_replay() -> None:
 
 
 @pytest.mark.xfail(
-    reason="DEFECT-3: replay_mode has no effect on ingest_timestamp — "
-    "ExtractedEventFields has no ingest_timestamp attribute, so the "
-    "hasattr() guard always falls through to wall-clock time",
+    reason="DEFECT-3: ingest_timestamp is still wall-clock. The replay_mode "
+    "flag this originally blamed has been removed — it never worked. Unlike "
+    "event_timestamp, ingest time is arguably meant to differ per run: it "
+    "records when this parse happened, not when the traffic was observed. "
+    "Whether it belongs in a byte-identity comparison is an open question.",
     strict=True,
 )
 def test_ingest_timestamps_are_stable_across_replay() -> None:
