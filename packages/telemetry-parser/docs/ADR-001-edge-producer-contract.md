@@ -11,7 +11,7 @@ That was not an oversight in documentation. **No edge producer has ever been spe
 
 The consequences surfaced while wiring the ingestion path against `event-schema-contracts`:
 
-- `X-Latency` had no unit, and the `latency_ms` rename in that repo's ADR-002 asserted one rather than establishing it. Both that field and `retry_count` were subsequently removed from `sip.registration v1` (ADR-002 Amendment 1).
+- `X-Latency` had no unit, and the `latency_ms` rename in that repo's ADR-001 asserted one rather than establishing it. Both that field and `retry_count` were subsequently removed from `sip.registration v1` (event-schema-contracts ADR-001 Amendment 1).
 - `Retry-After` is a response header (RFC 3261). This parser reads REGISTER requests only, so it would never legitimately appear.
 - `store_id` is required by `sip.registration v1` and exists nowhere in this parser — not in `SIPMessage`, not in `ExtractedEventFields`, not in `StructuredEvent`.
 - `X-Timestamp` is the source of `observed_at`, and when absent the parser substitutes wall-clock (DEFECT-2). With nothing defining the header, that fallback is not an edge case — it is the only path, so the platform's replay-determinism property has no foundation at this layer.

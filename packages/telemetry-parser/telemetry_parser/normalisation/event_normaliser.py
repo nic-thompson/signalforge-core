@@ -127,7 +127,7 @@ class EventNormaliser:
 
         - ``device_id`` is derived, not parsed. Nothing in a REGISTER
           carries a device identifier; the label it does carry is unique
-          only within a store. See event-schema-contracts ADR-002.
+          only within a store. See event-schema-contracts ADR-001.
         - ``registration_status`` is uppercased into the enum. The parser
           works in lowercase because that is what its own mapper returns.
         - ``transport_protocol`` comes off the Via header as a raw token.

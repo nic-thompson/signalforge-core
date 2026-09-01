@@ -59,7 +59,7 @@ no device identifier to emit, and now says so.
 
 The stable identity is derived at the ingestion boundary as a UUIDv5 over
 (store_id, device_label), with the label carried alongside because derivation is one-way.
-See event-schema-contracts ADR-002.
+See event-schema-contracts ADR-001.
 
 ---
 
@@ -140,7 +140,7 @@ parser reads REGISTER requests only, so a conforming request never carries it.
 
 `payload.latency`, `payload.retry_count` and `payload.session_duration` are gone with
 them, as are the corresponding fields on `sip.registration v1` — see
-event-schema-contracts ADR-002 Amendment 1.
+event-schema-contracts ADR-001 Amendment 1.
 
 ---
 
