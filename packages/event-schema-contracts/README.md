@@ -69,7 +69,23 @@ The contracts are organised into four payload domains, each carried by the share
 
 ### Telemetry (`telemetry/`)
 
-Device, network, and session events — the raw structured telemetry the parser emits and the streaming layer consumes. `DeviceRegistrationPayload` carries `device_id`, `store_id`, `device_type`, optional `firmware_version`, and `registered_at`; the `store_id` field is what lets downstream consumers project device→store membership.
+Device, network, session and SIP registration events.
+
+`SipRegistrationPayload` (`sip.registration`) is what `telemetry-parser` emits —
+one observed SIP REGISTER from one in-store device. `device_id` is a UUIDv5
+derived from `(store_id, device_label)`, with the label carried alongside because
+derivation is one-way; a device label is unique only within a store, so the store
+is part of the identity rather than an attribute of it.
+
+`DeviceRegistrationPayload` (`device.registration`) is a different thing despite
+the similar name: it describes device *provisioning* — `device_id`, `store_id`,
+`device_type`, optional `firmware_version`, `registered_at` — and has an
+incompatible field set. Nothing in the SIP path produces it. The two were confused
+once, which is why `sip.registration` exists; see
+[ADR-002](docs/ADR-002-sip-registration-schema.md).
+
+In both, `store_id` is what lets downstream consumers project device→store
+membership.
 
 ### Detection (`detection/`)
 
@@ -91,20 +107,66 @@ Two feature-vector variants for two distinct uses:
 
 ## Event envelope contract
 
-All canonical events share a structure:
+All canonical events share a structure. This is a real `model_dump(mode="json")`, not a sketch:
 
-```
+```json
 {
-  "schema_version": "v1",
-  "event_id": "uuid",
-  "trace": { "trace_id": "uuid", "root_trace_id": "uuid", "pipeline_stage": "..." },
-  "event_timestamp": "...",
-  "event_type": "device.registration",
+  "event_id": "4a20e3e5-3951-4c3b-bb75-29316d0d56c7",
+  "metadata": {
+    "schema_version": "v1",
+    "event_type": "device.registration",
+    "source": "unknown"
+  },
+  "trace": {
+    "trace_id": "b4b3f52c-cf8c-4cd4-bc7d-e9a81488ef97",
+    "root_trace_id": "c659a6fd-b143-460d-a4cc-8d97a7f4cbbe",
+    "pipeline_stage": "ingestion"
+  },
+  "event_timestamp": "2026-09-01T18:06:36.927809Z",
+  "ingest_timestamp": "2026-09-01T18:06:36.928206Z",
   "payload": { }
 }
 ```
 
-The envelope enforces schema identity, timestamp ordering, ingestion-boundary validation, cross-service compatibility, and replay safety.
+**`schema_version` and `event_type` are inside `metadata`, not at the top level.**
+This document showed them flat until September 2026, which is worth stating plainly
+because the mistake is not obvious from the class definition either: they are
+declared as `__event_type__` and `__schema_version__` ClassVars, which Pydantic
+treats as class metadata rather than model fields, so they are absent from
+`model_fields` while being present in every dump. A reader checking `model_fields`
+and finding nothing concludes the envelope does not name its own schema. It does —
+through `metadata`, populated at construction from those ClassVars.
+
+That matters to any consumer reading the JSON: an event is identifiable from
+`detail.metadata.event_type` without inspecting payload keys to guess.
+
+`metadata.source` defaults to `"unknown"`, and that default satisfies the field's
+own pattern. A producer that does not set it is therefore indistinguishable from
+one that genuinely declared itself unknown. Producers should set it.
+
+### What the envelope does and does not enforce
+
+Enforced at construction:
+
+- **Schema identity** — `__event_type__` and `__schema_version__` are required on
+  every subclass, and a duplicate `(event_type, schema_version)` pair is rejected.
+- **Timestamp ordering** — `event_timestamp` may not exceed `ingest_timestamp` by
+  more than the permitted clock skew.
+- **Payload typing** — `payload` is a `DomainEventPayload` subclass with
+  `extra="forbid"`, so an unknown field fails rather than being silently dropped.
+
+Not enforced here:
+
+- **Ingestion-boundary validation** is a property of the producer, not the
+  envelope. This library validates whatever is constructed from it; it cannot
+  make a service construct one. `telemetry-parser` began doing so in August 2026,
+  which is what made the guarantee real for the telemetry domain — before that,
+  `signal_forge.streaming.event_protocol` documented a validation step that no
+  component performed.
+- **Replay safety** is permitted rather than guaranteed. The schemas allow
+  derived UUIDv5 identifiers and carry observation time, which is what makes a
+  reproducible replay possible; whether any given producer derives its ids
+  deterministically is that producer's decision.
 
 ---
 
@@ -190,7 +252,8 @@ event_schema_contracts/
 ├── telemetry/
 │   ├── device_event.py
 │   ├── network_event.py
-│   └── session_event.py
+│   ├── session_event.py
+│   └── sip_registration_event.py
 ├── detection/
 │   └── detection_event.py
 ├── features/
@@ -210,9 +273,11 @@ Supporting documentation:
 
 ```
 docs/
-├── schema-versioning.md
+├── ADR-002-sip-registration-schema.md
+├── base-model-conventions.md
+├── compatibility-policy.md
 ├── event-lifecycle.md
-└── compatibility-policy.md
+└── schema-versioning.md
 ```
 
 ---
