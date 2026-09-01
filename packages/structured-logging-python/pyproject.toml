@@ -12,5 +12,25 @@ dev = [
   "fastapi",
 ]
 
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# PEP 561. Without py.typed in the installed package, mypy tells a
+# consumer this library has no type information and every import from it
+# fails as import-untyped. greengrass-publisher hit exactly that.
+#
+# Note what the marker does and does not claim. It makes the annotations
+# that exist available to consumers, and mypy does not report this
+# package's own errors in a consumer's run — that was verified rather
+# than assumed. It is not a claim that this package is mypy --strict
+# clean: it is not, and has never been checked, since mypy is not in the
+# dev extras. `mypy --strict structured_logging` currently reports
+# missing annotations in adapters/lambda_adapter.py and
+# adapters/worker_adapter.py. Worth fixing, and separate from making the
+# annotations that do exist usable.
+[tool.setuptools.package-data]
+structured_logging = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
