@@ -247,11 +247,21 @@ def test_complete_message_with_no_trailing_traffic_is_emitted() -> None:
 # --------------------------------------------------------------------
 # Replay determinism — SignalForge's headline property.
 #
-# These tests are xfail because they currently FAIL. They assert the
-# behaviour SignalForge claims; leaving them here (rather than
-# asserting the broken behaviour, or deleting them) means they will
-# start passing the moment the defects in DEFECTS.md are fixed, and
-# will show up as unexpected passes rather than being forgotten.
+# All three were xfail(strict=True) when written, asserting the behaviour
+# SignalForge claimed rather than the behaviour it had. That was the right
+# shape: each one turned into an unexpected pass the moment its defect was
+# fixed, which is a failing build rather than something quietly forgotten.
+#
+# DEFECT-2 was fixed on 2026-08-30 — event time comes from packet capture
+# with no fallback. DEFECT-1 was fixed on 2026-09-02 — event_id is derived
+# rather than generated. Both now assert plainly.
+#
+# DEFECT-3 remains xfail, but not because it is unfixed. ingest_timestamp
+# is wall-clock deliberately: it records when a parse happened, not when
+# traffic was observed, so two runs differing is arguably correct. The
+# marker is kept so that a change of behaviour fails loudly rather than
+# passing unnoticed, which would mean the decision had been reversed
+# without being revisited.
 # --------------------------------------------------------------------
 
 
@@ -273,15 +283,18 @@ def _run_twice(messages: list[bytes]) -> tuple[list, list]:
     return runs[0], runs[1]
 
 
-@pytest.mark.xfail(
-    reason="DEFECT-1: event_id is still uuid.uuid4() per event. The "
-    "preserve_event_ids flag this originally blamed has been removed — it "
-    "never worked — but nothing replaced it. event-schema-contracts now "
-    "publishes derive(role, *parts), so deriving the id from replay-stable "
-    "coordinates is possible; it has not been done.",
-    strict=True,
-)
 def test_event_ids_are_stable_across_replay() -> None:
+    """
+    DEFECT-1, fixed. event_id is derived under the role
+    event.sip_registration from the device identity, the observation time
+    and the registration Call-ID — all properties of the observed traffic
+    rather than of the run.
+
+    It was uuid4 until 2026-09-02, so a replay reproduced an event's
+    content but never its identity, which is what a consumer deduplicates
+    and joins on.
+    """
+
     first, second = _run_twice([HEALTHY_REGISTER, SECOND_DEVICE_REGISTER])
 
     assert [e.event_id for e in first] == [e.event_id for e in second]
@@ -302,11 +315,13 @@ def test_event_timestamps_are_stable_across_replay() -> None:
 
 
 @pytest.mark.xfail(
-    reason="DEFECT-3: ingest_timestamp is still wall-clock. The replay_mode "
-    "flag this originally blamed has been removed — it never worked. Unlike "
-    "event_timestamp, ingest time is arguably meant to differ per run: it "
-    "records when this parse happened, not when the traffic was observed. "
-    "Whether it belongs in a byte-identity comparison is an open question.",
+    reason="DEFECT-3: ingest_timestamp is wall-clock, deliberately. It "
+    "records when this parse happened rather than when the traffic was "
+    "observed, so two runs differing is arguably correct — the same "
+    "reasoning that leaves trace_id per-run unless a caller supplies one. "
+    "Kept as a strict xfail rather than deleted: it documents the position "
+    "and will fail loudly if the behaviour ever changes without the "
+    "decision being revisited. See telemetry-parser docs/replay-strategy.md.",
     strict=True,
 )
 def test_ingest_timestamps_are_stable_across_replay() -> None:
