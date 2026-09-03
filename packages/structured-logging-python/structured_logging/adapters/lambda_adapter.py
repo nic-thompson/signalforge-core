@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
 from structured_logging.core.logger import StructuredLogger
 from structured_logging.trace.trace_context import TraceContext
@@ -13,11 +13,16 @@ from structured_logging.trace.trace_propagation import TracePropagation
 # Module-level cold-start detector
 _COLD_START = True
 
+# Preserves the decorated handler's own signature through the decorator,
+# so a caller keeps the types they wrote rather than having them widened
+# to Callable[..., Any] on the way through.
+LambdaHandler = TypeVar("LambdaHandler", bound=Callable[..., Any])
+
 
 def lambda_logging_handler(
     logger: Optional[StructuredLogger] = None,
     log_event_metadata: bool = True,
-) -> Callable:
+) -> Callable[[LambdaHandler], LambdaHandler]:
     """
     Decorator enabling structured telemetry for AWS Lambda handlers.
 
@@ -32,10 +37,10 @@ def lambda_logging_handler(
 
     logger = logger or StructuredLogger("lambda-service")
 
-    def decorator(handler: Callable):
+    def decorator(handler: LambdaHandler) -> LambdaHandler:
 
         @wraps(handler)
-        def wrapper(event: Dict[str, Any], context: Any):
+        def wrapper(event: Dict[str, Any], context: Any) -> Any:
 
             global _COLD_START
 
@@ -131,7 +136,10 @@ def lambda_logging_handler(
 
             return result
 
-        return wrapper
+        # functools.wraps preserves the handler's identity at runtime but
+        # not its signature for a type checker, so the cast is what tells
+        # mypy the decorator returns what it was given.
+        return cast(LambdaHandler, wrapper)
 
     return decorator
 

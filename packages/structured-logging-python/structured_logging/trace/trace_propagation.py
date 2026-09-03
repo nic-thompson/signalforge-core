@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from collections.abc import Mapping
 from typing import Dict
 
 from structured_logging.trace.trace_context import TraceContext, _trace_context
@@ -56,7 +57,7 @@ class TracePropagation:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def extract_headers(headers: Dict[str, str]) -> None:
+    def extract_headers(headers: Mapping[str, str]) -> None:
         """
         Restore trace context from inbound request headers.
 

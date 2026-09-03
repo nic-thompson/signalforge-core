@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import time
 from contextlib import ContextDecorator
+from types import TracebackType
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, Dict, TypeVar
 
 from structured_logging.core.logger import StructuredLogger
-from structured_logging.trace.trace_context import TraceContext
+from structured_logging.trace.trace_context import TraceContext, TraceState
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -51,7 +52,7 @@ class PipelineLatency(ContextDecorator):
         self.start_timestamp: str | None = None
 
         # Stores previous trace context for restoration
-        self._trace_token = None
+        self._trace_token: TraceState | None = None
 
         self.logger = logger or _DEFAULT_LOGGER
 
@@ -67,7 +68,12 @@ class PipelineLatency(ContextDecorator):
 
         return self
 
-    def __exit__(self, exc_type, exc, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         if self.start_time is None:
             return
 
@@ -87,7 +93,11 @@ class PipelineLatency(ContextDecorator):
         }
 
         if exc is not None:
-            payload["exception_type"] = exc_type.__name__
+            # Taken from the exception rather than exc_type. The two are
+            # always consistent under the context-manager protocol, but
+            # only exc is narrowed by the guard above, and deriving the
+            # name from the object needs no assumption about the pair.
+            payload["exception_type"] = type(exc).__name__
 
         payload.update(self.metadata)
 
@@ -142,7 +152,7 @@ def pipeline_latency_decorator(
 
     def wrapper(func: F) -> F:
         @wraps(func)
-        def inner(*args: Any, **kwargs: Any):
+        def inner(*args: Any, **kwargs: Any) -> Any:
             with pipeline_latency(stage, logger, metadata):
                 return func(*args, **kwargs)
 

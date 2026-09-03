@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Callable, Awaitable
 
 from fastapi import Request, Response
+from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
@@ -28,9 +29,12 @@ class FastAPILoggingMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
+        # ASGIApp here is correct: BaseHTTPMiddleware wraps any ASGI
+        # application. Only configure_fastapi_logging below needs a
+        # Starlette, because add_middleware is Starlette's method.
         app: ASGIApp,
         logger: StructuredLogger | None = None,
-    ):
+    ) -> None:
         super().__init__(app)
         self.logger = logger or StructuredLogger("fastapi-service")
 
@@ -106,7 +110,11 @@ class FastAPILoggingMiddleware(BaseHTTPMiddleware):
 
 
 def configure_fastapi_logging(
-    app: ASGIApp,
+    # Starlette, not ASGIApp. add_middleware is a Starlette method and is
+    # not part of the ASGI protocol, so the previous annotation claimed to
+    # accept any ASGI application while the body required rather more than
+    # that. FastAPI subclasses Starlette, so a FastAPI app still fits.
+    app: Starlette,
     logger: StructuredLogger | None = None,
 ) -> None:
     """

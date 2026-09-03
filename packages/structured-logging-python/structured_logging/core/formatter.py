@@ -10,8 +10,44 @@ from structured_logging.core.context import ServiceContext
 from structured_logging.trace.trace_context import TraceContext
 from structured_logging.schema.log_event_schema import (
     LogEventSchema,
-    StructuredError
+    LogLevel,
+    StructuredError,
 )
+
+
+_STANDARD_LEVELS: dict[int, LogLevel] = {
+    logging.DEBUG: "DEBUG",
+    logging.INFO: "INFO",
+    logging.WARNING: "WARNING",
+    logging.ERROR: "ERROR",
+    logging.CRITICAL: "CRITICAL",
+}
+
+
+def _narrow_level(record: logging.LogRecord) -> LogLevel:
+    """
+    Narrows a LogRecord's level name to the schema's LogLevel.
+
+    ``levelname`` is a plain ``str``, and the schema requires one of five
+    literals. For the standard levels they coincide, but a caller may
+    register a custom level — ``logging.addLevelName(25, "NOTICE")`` — and
+    that name would fail schema validation at emit time, turning a log
+    call into an exception.
+
+    A custom level is therefore mapped to the highest standard level at or
+    below its numeric severity, so NOTICE(25) is recorded as INFO(20)
+    rather than crashing or being silently dropped. The name is lost; the
+    severity ordering is not, which is what a consumer filters on.
+    """
+
+    standard = _STANDARD_LEVELS.get(record.levelno)
+
+    if standard is not None:
+        return standard
+
+    below = [level for level in _STANDARD_LEVELS if level <= record.levelno]
+
+    return _STANDARD_LEVELS[max(below)] if below else "DEBUG"
 
 
 class StructuredJSONFormatter(logging.Formatter):
@@ -38,7 +74,7 @@ class StructuredJSONFormatter(logging.Formatter):
 
         return LogEventSchema(
             timestamp=datetime.fromtimestamp(record.created, timezone.utc),
-            level=record.levelname,
+            level=_narrow_level(record),
             service=ServiceContext.service_name(),
             environment=ServiceContext.environment(),
             event_type=getattr(record, "event_type", "log.event"),

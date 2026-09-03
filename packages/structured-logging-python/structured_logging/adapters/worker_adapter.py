@@ -5,16 +5,21 @@ import inspect
 import time
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, TypeVar, cast
 
 from structured_logging.core.logger import StructuredLogger
 from structured_logging.trace.trace_context import TraceContext
 from structured_logging.trace.trace_propagation import TracePropagation
 
+# Preserves the decorated handler's own signature through the decorator.
+# Bound to Callable[..., Any] rather than a specific shape because this
+# decorator accepts both sync and async handlers.
+WorkerHandler = TypeVar("WorkerHandler", bound=Callable[..., Any])
+
 def worker_logging_handler(
         queue_name: str,
         logger: StructuredLogger | None = None,
-) -> Callable:
+) -> Callable[[WorkerHandler], WorkerHandler]:
     """
     Decorator enabling structured telemetry for async/sync worker handlers.
 
@@ -29,12 +34,14 @@ def worker_logging_handler(
 
     logger = logger or StructuredLogger("worker-service")
 
-    def decorator(handler: Callable):
+    def decorator(handler: WorkerHandler) -> WorkerHandler:
 
         if inspect.iscoroutinefunction(handler):
 
             @wraps(handler)
-            async def async_wrapper(message: Dict[str, Any], *args, **kwargs):
+            async def async_wrapper(
+                message: Dict[str, Any], *args: Any, **kwargs: Any
+            ) -> Any:
 
                 start_time = time.perf_counter()
                 start_timestamp = datetime.now(timezone.utc).isoformat()
@@ -130,12 +137,16 @@ def worker_logging_handler(
                     
                 return result
             
-            return async_wrapper
+            # See lambda_adapter: wraps preserves runtime identity but not
+            # the signature for a type checker.
+            return cast(WorkerHandler, async_wrapper)
     
         else:
 
             @wraps(handler)
-            def sync_wrapper(message: Dict[str, Any], *args, **kwargs):
+            def sync_wrapper(
+                message: Dict[str, Any], *args: Any, **kwargs: Any
+            ) -> Any:
 
                 start_time = time.perf_counter()
                 start_timestamp = datetime.now(timezone.utc).isoformat()
@@ -210,7 +221,7 @@ def worker_logging_handler(
                 
                 return result
             
-            return sync_wrapper
+            return cast(WorkerHandler, sync_wrapper)
         
     return decorator
 
@@ -263,7 +274,7 @@ def log_retry_event(
     )
 
 
-def _extract_retry_count(message) -> int:
+def _extract_retry_count(message: Dict[str, Any]) -> int:
     """
     Attempt to extract retry count from metadata.
 

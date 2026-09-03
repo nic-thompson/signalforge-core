@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass
+from collections.abc import Iterator
 from contextlib import contextmanager
 
 
@@ -110,7 +111,7 @@ class TraceContext:
 
     @classmethod
     @contextmanager
-    def span(cls, pipeline_stage: str | None = None):
+    def span(cls, pipeline_stage: str | None = None) -> Iterator[TraceState]:
         previous = cls.get()
         new_span = cls.child_trace(pipeline_stage)
 
