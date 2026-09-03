@@ -43,12 +43,25 @@ observed_at
 device identities
 protocol extraction semantics
 
-Two things are still generated fresh per run and are therefore **not**
-reproducible: `event_id` and, when no trace is supplied, `trace_id`. Both
-are `uuid4()`. Deriving them would make them reproducible too, and
-`event_schema_contracts.base.identity.derive` now exists to do it — but
-that is a change not yet made, and this document says so rather than
-implying a guarantee the code does not provide.
+`event_id` is derived rather than generated, under the role
+`event.sip_registration`, from the event's own coordinates: the device
+identity, the observation time, and the registration Call-ID. All three
+are properties of the observed traffic rather than of the run, so the
+same capture yields the same ids on every parse.
+
+It was `uuid4()` until 2026-09-02. A replay therefore reproduced an
+event's content but never its identity — and identity is what a consumer
+deduplicates and joins on, so two parses of one capture produced two
+populations of events indistinguishable in every field except the one
+meant to distinguish them.
+
+One thing remains **not** reproducible: `trace_id`, when no trace is
+supplied to `parse_stream`. It is `uuid4()` in that case, and arguably
+should be — a trace correlates one processing run, and two runs are two
+runs. A caller wanting a byte-identical envelope supplies the trace id,
+which is what makes it a parameter. `ingest_timestamp` is wall-clock for
+the same reason: it records when this parse happened, not when the
+traffic was observed.
 
 ---
 
@@ -117,4 +130,4 @@ for event in pipeline.parse_stream(packet_stream):
 ```
 
 Output datasets are reproducible across executions given identical input
-streams, with the `event_id` and `trace_id` caveat above.
+streams, with the `trace_id` and `ingest_timestamp` caveat above.

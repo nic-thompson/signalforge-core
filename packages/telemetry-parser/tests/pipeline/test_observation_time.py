@@ -316,3 +316,128 @@ def test_pipeline_stage_is_ingestion():
     )
 
     assert event.trace.pipeline_stage is PipelineStage.INGESTION
+
+
+# ---------------------------------------------------------------
+# event identity is derived, not generated
+# ---------------------------------------------------------------
+
+# DEFECT-1. event_id was uuid4, so a replay reproduced an event's content
+# but never its identity — and identity is what a downstream consumer
+# deduplicates and joins on. Two parses of one capture produced two
+# populations of events that were indistinguishable in every field except
+# the one meant to distinguish them.
+
+
+def test_event_ids_are_stable_across_parses():
+    packets = [
+        packet(register_message(device="headset-01", call_id="a"), 1000, CAPTURED_AT),
+        packet(
+            register_message(device="headset-02", call_id="b"),
+            2000,
+            CAPTURED_AT + timedelta(seconds=5),
+        ),
+    ]
+
+    first = list(ParserPipeline(store_id=STORE_ID).parse_stream(packets))
+    second = list(ParserPipeline(store_id=STORE_ID).parse_stream(packets))
+
+    assert [e.event_id for e in first] == [e.event_id for e in second]
+
+
+def test_event_ids_are_derived_not_random():
+    """A v5 UUID is derived; a v4 is generated."""
+
+    events = list(
+        ParserPipeline(store_id=STORE_ID).parse_stream(
+            [packet(register_message(), 1000, CAPTURED_AT)]
+        )
+    )
+
+    assert events[0].event_id.version == 5
+
+
+def test_distinct_events_get_distinct_ids():
+    # One TCP session, so sequence numbers must be contiguous — gaps
+    # would leave later packets buffered behind a hole that never fills,
+    # which is the reassembler working correctly and the test wrong.
+    messages = [
+        register_message(device=f"headset-{i:02d}", call_id=f"call-{i}")
+        for i in range(4)
+    ]
+
+    packets = []
+    sequence = 1000
+
+    for index, message in enumerate(messages):
+        packets.append(
+            packet(message, sequence, CAPTURED_AT + timedelta(seconds=index))
+        )
+        sequence += len(message)
+
+    events = list(ParserPipeline(store_id=STORE_ID).parse_stream(packets))
+
+    assert len(events) == 4
+    assert len({e.event_id for e in events}) == len(events)
+
+
+def test_the_same_traffic_under_a_different_store_is_a_different_event():
+    """
+    Store identity reaches the event id through device_id, which is
+    derived from (store_id, device_label). The same REGISTER observed by
+    two differently-configured controllers describes two different
+    devices, so it is two different events.
+    """
+
+    packets = [packet(register_message(), 1000, CAPTURED_AT)]
+
+    bristol = list(ParserPipeline(store_id="store-bristol").parse_stream(packets))
+    leeds = list(ParserPipeline(store_id="store-leeds").parse_stream(packets))
+
+    assert bristol[0].event_id != leeds[0].event_id
+
+
+def test_event_id_differs_from_the_device_id_it_is_derived_from():
+    """
+    Both are derived from overlapping coordinates. The role is what keeps
+    them apart — without it, an envelope's id and the device's id built
+    from the same inputs would collide.
+    """
+
+    event = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(), 1000, CAPTURED_AT)]
+            )
+        )
+    )
+
+    assert event.event_id != event.payload.device_id
+
+
+def test_observation_time_changes_the_event_id():
+    """
+    The same device registering twice is two events, distinguished by
+    when each was seen.
+    """
+
+    from datetime import timedelta
+
+    later = CAPTURED_AT + timedelta(seconds=30)
+
+    first = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(), 1000, CAPTURED_AT)]
+            )
+        )
+    )
+    second = next(
+        iter(
+            ParserPipeline(store_id=STORE_ID).parse_stream(
+                [packet(register_message(), 1000, later)]
+            )
+        )
+    )
+
+    assert first.event_id != second.event_id

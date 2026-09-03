@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from ipaddress import ip_address
 
-from event_schema_contracts.base.identity import derive_device_id
+from event_schema_contracts.base.identity import derive, derive_device_id
 from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import PipelineStage, TraceContext
 from event_schema_contracts.telemetry.sip_registration_event import (
@@ -38,6 +38,16 @@ class EventNormaliser:
     """
 
     SOURCE = "telemetry-parser"
+
+    # The role under which event ids are derived. Frozen: changing it
+    # re-bases every event id this parser has ever produced, and a replay
+    # would then disagree with the run it is meant to reproduce.
+    #
+    # Named for the event rather than the payload, matching signal-forge's
+    # "event.detection" and "event.alert" — an envelope's id and the id of
+    # the thing it carries are different records built from overlapping
+    # coordinates, and the role is what keeps them from colliding.
+    EVENT_ID_ROLE = "event.sip_registration"
 
     # This parser observes traffic at the ingestion boundary, so every
     # event it produces enters the pipeline at that stage.
@@ -95,8 +105,16 @@ class EventNormaliser:
             observed_at
         )
 
+        payload = self._build_payload(extracted, event_timestamp)
+
         return SipRegistrationEvent(
-            event_id=uuid.uuid4(),
+            # Derived, not generated. A uuid4 here made the same capture
+            # produce different ids on every parse, so a replay could
+            # reproduce an event's content but never its identity — which
+            # is most of what replay is for. The coordinates are all
+            # properties of the observed traffic rather than of the run:
+            # the device, the instant it was seen, and the transaction.
+            event_id=self._derive_event_id(payload),
             event_timestamp=event_timestamp,
             ingest_timestamp=TimestampUtils.ingest_timestamp(),
             trace=TraceContext(
@@ -114,7 +132,32 @@ class EventNormaliser:
                 schema_version=SipRegistrationEvent.__schema_version__,
                 source=self.SOURCE,
             ),
-            payload=self._build_payload(extracted, event_timestamp),
+            payload=payload,
+        )
+
+    def _derive_event_id(self, payload: SipRegistrationPayload) -> uuid.UUID:
+        """
+        Derives this event's identity from the traffic it describes.
+
+        ``device_id`` already encodes (store_id, device_label), so it is
+        used rather than repeating both. ``observed_at`` is the capture
+        time of the packet carrying the message's first byte, which is
+        stable across parses of the same capture. ``registration_call_id``
+        distinguishes two registrations a device makes at the same
+        instant; it is optional in the schema, and its absence is part of
+        the coordinate rather than a reason to fall back to randomness.
+
+        Two identical REGISTERs observed at the same microsecond from the
+        same device with the same Call-ID would derive the same id. That
+        is a retransmission described twice, and treating it as one event
+        is the more defensible reading.
+        """
+
+        return derive(
+            self.EVENT_ID_ROLE,
+            payload.device_id,
+            payload.observed_at.isoformat(),
+            payload.registration_call_id,
         )
 
     def _build_payload(
