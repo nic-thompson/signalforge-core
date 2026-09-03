@@ -1,16 +1,29 @@
 # Wiring component repos to the integration suite
 
-Two mechanisms keep this suite from going stale. They're complementary:
-dispatch gives fast feedback, the schedule is the backstop for when
-dispatch doesn't fire.
+Two mechanisms are meant to keep this suite from going stale. They are
+complementary: dispatch gives fast feedback, the schedule is the backstop
+for when dispatch does not fire.
+
+> **Only the schedule is wired.** No component repo sends a dispatch —
+> the job in `component-repo-dispatch-job.yml` has not been added to any
+> of them, and no token exists. A break in a component therefore surfaces
+> at the next nightly run rather than within minutes of the merge that
+> caused it. Everything under "repository_dispatch" below is a setup
+> guide for work not yet done, not a description of what happens today.
+>
+> That is a real gap but a bounded one: up to 24 hours of latency on a
+> project with one committer. It is recorded here rather than left for a
+> reader to infer from the absence of dispatches.
 
 | | Latency | Fails safe? |
 |---|---|---|
-| `repository_dispatch` | Minutes after a component merges | No — a missing token or a repo not yet wired means nothing fires |
-| `schedule` (nightly) | Up to 24 hours | Yes — runs regardless of what any other repo does |
+| `repository_dispatch` | Minutes after a component merges | No — a missing token or a repo not yet wired means nothing fires. **Not currently wired.** |
+| `schedule` (nightly) | Up to 24 hours | Yes — runs regardless of what any other repo does. **This is what runs today.** |
 
 Build both. The schedule alone is too slow to be useful during active
 work; dispatch alone silently stops working the moment a token expires.
+The row above is exactly why the schedule was built first: dispatch not
+being wired is invisible, and the nightly run is what covers it.
 
 ---
 
@@ -27,7 +40,10 @@ Two things worth knowing:
   keeping the repo active.
 - A failing nightly run **opens an issue** (labelled `nightly-failure`),
   because nobody owns a cron the way an author owns a PR. Repeat
-  failures comment on the existing issue rather than opening duplicates.
+  failures comment on the existing issue rather than opening duplicates,
+  and a subsequent passing run comments and closes it. Until 2026-09-03
+  nothing closed it on recovery, so an issue outlived the failure it
+  described and had to be closed by hand.
 
 ---
 
@@ -44,13 +60,17 @@ Create a **fine-grained PAT**:
 
 1. GitHub → Settings → Developer settings → Personal access tokens →
    Fine-grained tokens → Generate new token
-2. Repository access: select `signalforge-integration-tests`,
-   `telemetry-parser`, `structured-logging-python`, `greengrass-publisher`
+2. Repository access: select `signalforge-integration-tests`
 3. Permissions:
    - `signalforge-integration-tests` → **Contents: Read and write**
      (required to send a dispatch)
-   - the component repos → **Contents: Read** (so the integration
-     workflow can check them out — these are private repos)
+
+   The component repos no longer need to be listed. They were private
+   when this was written, so the same token also granted the integration
+   workflow read access to check them out. All four are public now and
+   the checkouts use no token at all — which is what fixed this suite's
+   first eleven days of failures, where an unset `COMPONENT_REPO_TOKEN`
+   resolved to an empty string and `actions/checkout` rejected it.
 4. Set an expiry you'll actually notice. A one-year token that expires
    silently reintroduces exactly the staleness problem this is
    preventing — the nightly run is what covers you when it does.
@@ -64,13 +84,9 @@ In **each component repo** (`telemetry-parser`,
 gh secret set INTEGRATION_DISPATCH_TOKEN --repo nic-thompson/<repo>
 ```
 
-In **this repo**, so the workflow can check out the private components:
-
-```bash
-gh secret set COMPONENT_REPO_TOKEN --repo nic-thompson/signalforge-integration-tests
-```
-
-Both can be the same PAT.
+Nothing needs to be set in this repo. `COMPONENT_REPO_TOKEN` was required
+while the component repos were private; they are public, the checkouts
+pass no token, and the secret is no longer referenced by the workflow.
 
 ### Adding the dispatch job
 
@@ -121,10 +137,24 @@ A `204 No Content` means it fired. Check the Actions tab for the run.
 
 ## Expected result
 
-**12 passed, 3 xfailed.**
+All tests pass, with **one `xfail`** — DEFECT-3.
 
-The three `xfail`s are the replay-determinism defects in `DEFECTS.md`.
-They're `strict=True`, so when someone fixes the underlying defects in
-`telemetry-parser` this suite goes **red on unexpected-pass** — the
-signal to remove the `xfail` markers. That's intentional: it makes
-fixing the defect impossible to do silently.
+The three replay-determinism defects in `DEFECTS.md` were all `xfail`
+when written, and the markers are `strict=True`, so fixing a defect turns
+its test into an **unexpected pass** and the suite goes red. That is
+intentional: it makes fixing a defect impossible to do silently, and it
+worked exactly as designed.
+
+- **DEFECT-2** fixed 2026-08-30. Event time comes from packet capture
+  with no fallback.
+- **DEFECT-1** fixed 2026-09-02. `event_id` is derived rather than
+  generated.
+- **DEFECT-3** remains `xfail`, but not because it is unfixed.
+  `ingest_timestamp` is wall-clock deliberately — it records when a parse
+  happened, not when traffic was observed, so two runs differing is
+  arguably correct. The marker is kept so that a change of behaviour
+  fails loudly rather than passing unnoticed, which would mean the
+  decision had been reversed without being revisited.
+
+A count is deliberately not given here. This document claimed "12 passed,
+3 xfailed" for a fortnight during which the suite never ran at all.
