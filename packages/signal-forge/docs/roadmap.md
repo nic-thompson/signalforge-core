@@ -1,8 +1,10 @@
 # SignalForge — roadmap
 
-> **Purpose.** Map the full scope of the project from Phase 1 through Phase 7 with realistic time estimates and explicit milestones. Capture the definition of done so we can recognise the destination when we get there.
+> **Purpose.** Map the full scope of the project with realistic time estimates and explicit milestones. Capture the definition of done so we can recognise the destination when we get there.
 >
 > **Scope.** This document is for human planning, not automated tooling. Estimates are honest expectations, not commitments. Per-phase plans (`docs/phases/phase-N-plan.md`) carry detailed task lists; this document is the long-range view.
+>
+> **Status.** Phases 1–7 are complete and `v1.0.0` is tagged. The estimates and risks below were written during Phase 2 and are left as they were: they are a record of what was expected, which is more useful than a retrospective tidy-up. "Beyond v1.0.0" at the end covers what comes next, and is written to a different standard — it gives shape rather than hours, because these phases depend on AWS behaviour that has repeatedly turned out to differ from what the documentation implied.
 
 ## Definition of done
 
@@ -34,7 +36,7 @@ Estimates are in working hours of focused engineering. They assume Option A work
 
 **Estimate vs actual:** Estimated 6–8 hours. Actual ~10 hours.
 
-### Phase 2 — Detection engines 🟡 In progress
+### Phase 2 — Detection engines ✅ Complete
 
 **Delivers:** `OfflineDetector`, `OutageDetector`, `AnomalyDetector`. Pipeline integration for detector dispatch and detection collection. Trace propagation through window emissions (Phase 1 dataclass extension). Detection-event schema upstreamed.
 
@@ -42,7 +44,7 @@ Estimates are in working hours of focused engineering. They assume Option A work
 
 **Estimate:** 8–10 hours. **Tracked progress:** ~6 hours done, ~3 hours remaining.
 
-### Phase 3 — Feature pipelines
+### Phase 3 — Feature pipelines ✅ Complete
 
 **Delivers:** Online feature aggregations (counts, sums, means, distincts) for use by detectors and downstream consumers. A `DeviceRegistry` component to replace the constructor-callable hack in Phase 2's `OutageDetector`. Feature emissions written to a sink the dataset layer (Phase 4) can pick up.
 
@@ -56,7 +58,7 @@ Estimates are in working hours of focused engineering. They assume Option A work
 
 **Estimate:** 10–14 hours.
 
-### Phase 4 — Dataset partitioning and S3 export
+### Phase 4 — Dataset partitioning and S3 export ✅ Complete
 
 **Delivers:** A dataset layer that partitions emissions and detections by `(store_id, hour)` (or similar) and writes them to S3 in Parquet. Replay-aware: separate sinks for live and replay outputs. Honours the brief's 2-year retention requirement via S3 lifecycle policies (declared in this layer's docs; configured upstream in `aws-event-pipeline-infra`).
 
@@ -70,7 +72,7 @@ Estimates are in working hours of focused engineering. They assume Option A work
 
 **Estimate:** 14–18 hours. The S3 mock infrastructure is the time sink — `moto` or `localstack` setup is non-trivial.
 
-### Phase 5 — Alert routing
+### Phase 5 — Alert routing ✅ Complete
 
 **Delivers:** A consumer of `ProcessingResult.detections` that routes detections to alert sinks (EventBridge, SNS, conceptually also Slack/PagerDuty). Severity-aware: CRITICAL paged immediately, WARNING digested. Acknowledgement and reminder cadence policies (the bit we deferred from Phase 2's `OfflineDetector` design).
 
@@ -84,7 +86,7 @@ Estimates are in working hours of focused engineering. They assume Option A work
 
 **Estimate:** 12–16 hours.
 
-### Phase 6 — Dashboard projections
+### Phase 6 — Dashboard projections ✅ Complete
 
 **Delivers:** Materialised views suitable for a sub-5-second dashboard. Aggregations of detections by store, by detection_type, by severity, over rolling time windows. Probably written to DynamoDB or a similar low-latency store. The dashboard itself isn't in scope; the projections that feed it are.
 
@@ -98,7 +100,7 @@ Estimates are in working hours of focused engineering. They assume Option A work
 
 **Estimate:** 10–14 hours.
 
-### Phase 7 — Replay and backfill orchestration
+### Phase 7 — Replay and backfill orchestration ✅ Complete
 
 **Delivers:** The Step Functions workflow integration referenced in `docs/replay-workflows.md`. Takes a `(start_time, end_time, event_pattern)` window, iterates archived events from the EventBridge archive, feeds them through a `RealtimePipeline` configured for replay (`PlatformSettings.for_replay()`), routes outputs to a sealed replay sink (separate S3 bucket, separate alert sink in Phase 5).
 
@@ -143,6 +145,48 @@ A milestone is a commit on `main` plus a tag plus a status snapshot. The tags ma
 | Replay orchestration | `phase-7-complete` | Phase 7 PR merged |
 | Project complete | `v1.0.0` | All phases merged, definition-of-done satisfied |
 
+## Beyond v1.0.0
+
+The definition of done above deliberately excluded deployment. That exclusion held while this repository was the analytics control plane and nothing else existed to deploy against. It no longer holds: `aws-event-pipeline-infra` has a bus, five stage queues, an archive and a working replay workflow deployed to dev, and as of 30 August 2026 real events flow into it.
+
+The two halves have never met. Everything below follows from that.
+
+These phases are described in shape rather than hours. The estimates in the section above were made about code in this repository, where the unknowns were design ones. The phases below depend on AWS behaviour, and this project's recent experience is that AWS behaviour differs from what the documentation implies more often than is comfortable — a replay workflow deployed to three environments since 21 August turned out to have four independent defects, none of which could have been found without running it.
+
+### Phase 8 — Connecting the streaming path
+
+The callers. Nothing polls the ingestion queue; nothing reads the archive. `signal_forge.replay`'s production event source still raises `NotImplementedError`. See `docs/phases/phase-8-plan.md`.
+
+The design question is settled by the architecture rather than by preference: the pipeline holds watermark and open-window state across `process_batch` calls, so its caller must be a long-running process rather than a function invocation. A Lambda would lose open windows on recycle, and windows would silently never close.
+
+### Phase 9 — A second producer
+
+The platform claim is currently untested. This repository consumes one event type from one producer, and "adding a source requires no change to the middle" is a property we believe from the design rather than from evidence.
+
+Customer call points are the natural first: a button press and its acknowledgement are two schemas, one producer, and a response-time metric that means something operationally. If the bus, archive, replay and audit machinery genuinely need no change, the claim holds. If they do, better to know.
+
+Note that this producer is API-sourced rather than packet-sourced. It needs no reassembly, no framing, no protocol parsing — which makes it a much smaller component than `telemetry-parser`, and a fair test of whether the ingestion path generalises.
+
+### Phase 10 — Widening the domain
+
+Shelf alerts, EPOS override requests, lone-worker alarms — each a schema and a producer following the pattern Phase 9 establishes. This is where the event vocabulary stops being about one protocol.
+
+### Phase 11 — Warehouse
+
+Athena over the dataset-export bucket, once several event types exist to join. Response times by store, alert clustering by time of day, override rates by till. Deliberately after Phase 10: a query layer over a single event type gives you a table of registrations and little to ask of it.
+
+### Phase 12 — Reconsider the SIP path
+
+The headsets are DECT. They communicate on localised wireless frequencies rather than the store network, which means a SIP REGISTER is not a headset checking in — at most it is a base station or PBX bridge doing so.
+
+So `sip.registration` measures the health of one integration point, not of the fleet, and `device_label` carrying values like `headset-12` implies the parser sees headsets when it probably does not. That is a problem with what the data means rather than with any code, and it should either be narrowed to claim what it actually observes or retired.
+
+### The standing caveat
+
+Every event in this system is synthetic, generated from a contract that was authored rather than observed, describing devices that do not exist. `telemetry-parser`'s ADR-001 records why: with no fleet to observe, the edge producer contract could only be written, not discovered.
+
+That is defensible and documented. It gets less defensible with each phase that builds further on it, and Phases 9 and 10 in particular involve inventing what a button press or a shelf alert reports. Modelling a documented product feature is a smaller fiction than inventing protocol internals — but it is still a fiction, and the distance between this system and one fed by real traffic grows rather than shrinks as it is extended.
+
 ## Risks and mitigations
 
 The actual risks to delivery, called out so they don't surprise us.
@@ -167,5 +211,5 @@ Building a production-quality platform while learning Platform Engineering is re
 
 - `RESUMING.md` for orientation.
 - `docs/working-notes.md` for engineering principles, decisions, and the cumulative project diary.
-- `docs/phases/phase-2-plan.md` for the active phase. Future phases get their own plan files when started.
+- `docs/phases/phase-8-plan.md` for the active phase. Each phase gets its own plan file when started.
 - DDIA chapters most relevant to upcoming phases: 11 (Batch Processing) for Phase 4, 9 (Distributed Systems) and 10 (Consistency and Consensus) for Phase 5, 12 (Stream Processing, Reasoning About Time) throughout.
