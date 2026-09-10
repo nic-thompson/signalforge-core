@@ -80,9 +80,24 @@ Step 5 deserves attention. The detectors look for device liveness — a device t
 
 The generator therefore needs a way to produce a device that goes quiet: a `--silent-after` option, or a scenario flag. This is a small change to `aws-event-pipeline-infra/scripts/telemetry_generator.py` and it belongs in this phase, because without it the pipeline can be connected and still prove nothing.
 
+## Settled: one queue
+
+The infrastructure has five stage queues — ingestion, validation, enrichment, feature, dataset-export — implying a consumer per stage, each publishing the next event type.
+
+Nothing produces those event types. Searched across `signal-forge` and `telemetry-parser`: no occurrence of `telemetry.validated`, `telemetry.enriched` or `feature.generated` outside the Terraform that routes on them. `RealtimePipeline` performs validation, enrichment, features and detection in one function-shaped process, so there is nothing to hand between stages. Four of the five queues, their DLQs and their rules can never receive anything.
+
+**The consumer reads the ingestion queue. The rest stay unused.**
+
+The decomposition is a legitimate design and would matter at hundreds of Controllers with real volume. Adopting it now would mean rewriting a finished, tested component to fit scaffolding that predates it — letting the infrastructure dictate the architecture rather than the other way round. Recorded as Gap 2 in `signalforge-architecture.md`.
+
+## An assumption this rests on
+
+**One Controller per store.** `store_id` is therefore both the site and the publisher: the partition key for every window, and an input to every derived device identity. A site needing two Controllers would break that at every level.
+
+Nothing in any repository states this. It is recorded here because it is load-bearing and was, until 2026-09-03, simply true and unwritten.
+
 ## Open questions
 
-- **Which queue does the consumer read?** The infrastructure has five stage queues — ingestion, validation, enrichment, feature, dataset-export — implying a consumer per stage, each publishing to the next. `RealtimePipeline` does all of that in one process. Either the stage queues describe a decomposition the control plane does not implement, or the consumer reads ingestion and the rest are unused. This needs deciding before the consumer is written, and the answer may be that the queue topology was designed for a different shape than the one that was built.
 - **What happens to messages that fail to deserialise?** Each queue has a DLQ. Nothing currently sets a redrive policy that would route to it.
 - **Does `process_batch` need the whole batch or can it stream?** SQS delivers up to ten messages per receive; the pipeline takes an iterable. Whether a receive maps to a batch, or the consumer accumulates, affects when windows close.
 
