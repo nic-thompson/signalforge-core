@@ -53,6 +53,24 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["signal_forge*"]
 
+# PEP 561. Without this, mypy tells a consumer this package has no type
+# information and every import from it fails as import-untyped —
+# exactly what happened the first time anything outside this
+# repository's own test suite depended on it. event-schema-contracts,
+# telemetry-parser and structured-logging-python hit the identical gap
+# earlier in this project; this is the fourth repository to need it,
+# for the same reason each time: nobody had ever installed the package
+# from outside itself.
+#
+# Note what this does not claim. `mypy --strict signal_forge` currently
+# reports 9 errors across 6 files — none in the modules the first
+# external consumer (aws-event-pipeline-infra's ingestion consumer)
+# imports, but real, and not yet fixed. The marker makes the
+# annotations that exist usable to a consumer; it is not an assertion
+# that every annotation in this package has been strict-checked.
+[tool.setuptools.package-data]
+signal_forge = ["py.typed"]
+
 # ----------------------------------------------------------------------
 # pytest
 # ----------------------------------------------------------------------
