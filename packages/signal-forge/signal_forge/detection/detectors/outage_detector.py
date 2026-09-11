@@ -33,6 +33,7 @@ from typing import ClassVar, Literal
 from uuid import uuid4
 
 from event_schema_contracts.base.identity import derive
+from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import (
     DetectionEvent,
@@ -76,6 +77,11 @@ class OutageDetector:
         stores (lookup returns None) are skipped silently - there's
         no meaningful ratio to compute.
     """
+
+    # Named for this component rather than left to BaseEvent's own
+    # auto-injection, which defaults to "unknown" — indistinguishable
+    # downstream from a producer that never named itself at all.
+    _SOURCE = "signal-forge.outage_detector"
 
     name: ClassVar[str] = "OutageDetector"
     aggregation_name: ClassVar[str] = "distinct_devices"
@@ -201,6 +207,11 @@ class OutageDetector:
             event_id=derive("event.detection", detection_id),
             event_timestamp=emission.window_end,
             trace=TraceContext(trace_id=trace_id),
+            metadata=EventMetadata(
+                event_type=DetectionEvent.__event_type__,
+                schema_version=DetectionEvent.__schema_version__,
+                source=self._SOURCE,
+            ),
             payload=payload,
         )
 
@@ -258,5 +269,10 @@ class OutageDetector:
             event_id=derive("event.detection", detection_id),
             event_timestamp=emission.window_end,
             trace=TraceContext(trace_id=trace_id),
+            metadata=EventMetadata(
+                event_type=DetectionEvent.__event_type__,
+                schema_version=DetectionEvent.__schema_version__,
+                source=self._SOURCE,
+            ),
             payload=payload,
         )

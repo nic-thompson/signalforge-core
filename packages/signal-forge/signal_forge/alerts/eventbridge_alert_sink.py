@@ -104,6 +104,15 @@ class EventBridgeAlertSink:
             self._client.put_events(Entries=entries)
 
     def _entry(self, alert: AlertEvent) -> dict[str, str]:
+        # _entry is only ever called from publish(), strictly after its
+        # "if self._bus is None: return" guard — genuinely unreachable
+        # with self._bus is None, but mypy narrows a local within one
+        # function body, not an instance attribute across a call into a
+        # different method. The assertion makes the invariant explicit
+        # and enforced rather than merely true by inspection of two
+        # separate methods.
+        assert self._bus is not None
+
         payload = alert.payload
         # DetailType carries severity and detection type so infra's rules
         # can route without parsing Detail: "<severity>:<detection_type>",

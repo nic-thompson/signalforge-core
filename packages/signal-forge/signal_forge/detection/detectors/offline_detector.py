@@ -22,6 +22,7 @@ from typing import ClassVar, Literal
 from uuid import UUID
 
 from event_schema_contracts.base.identity import derive
+from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import (
     DetectionEvent,
@@ -62,6 +63,11 @@ class OfflineDetector:
         no detection is emitted (the ``DetectionEvent`` schema requires
         a non-empty ``store_id``).
     """
+
+    # Named for this component rather than left to BaseEvent's own
+    # auto-injection, which defaults to "unknown" — indistinguishable
+    # downstream from a producer that never named itself at all.
+    _SOURCE = "signal-forge.offline_detector"
 
     name: ClassVar[str] = "OfflineDetector"
 
@@ -168,6 +174,11 @@ class OfflineDetector:
             event_id=derive("event.detection", detection_id),
             event_timestamp=source_event.event_timestamp,
             trace=TraceContext(trace_id=source_event.trace.trace_id),
+            metadata=EventMetadata(
+                event_type=DetectionEvent.__event_type__,
+                schema_version=DetectionEvent.__schema_version__,
+                source=self._SOURCE,
+            ),
             payload=payload,
         )
 
@@ -196,5 +207,10 @@ class OfflineDetector:
             event_id=derive("event.detection", detection_id),
             event_timestamp=source_event.event_timestamp,
             trace=TraceContext(trace_id=source_event.trace.trace_id),
+            metadata=EventMetadata(
+                event_type=DetectionEvent.__event_type__,
+                schema_version=DetectionEvent.__schema_version__,
+                source=self._SOURCE,
+            ),
             payload=payload,
         )

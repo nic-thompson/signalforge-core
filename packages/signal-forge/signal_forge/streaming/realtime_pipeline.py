@@ -52,9 +52,19 @@ from uuid import UUID
 
 from event_schema_contracts.alerts.alert_event import AlertEvent
 from event_schema_contracts.base.identity import derive
+from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import DetectionEvent
-from event_schema_contracts.features.windowed_feature_vector import (
+
+# event_schema_contracts.features.windowed_feature_vector defines no
+# __all__, so mypy --strict's --no-implicit-reexport refuses this
+# import even though FeatureValue genuinely exists there and works
+# correctly at runtime — verified directly, not assumed. mypy attaches
+# the error to the "from ... import (" line itself, not to the
+# individual name, hence the ignore sitting here. The fix belongs in
+# event-schema-contracts (adding __all__), which is a separate
+# repository and a deliberate change of its own, not made here.
+from event_schema_contracts.features.windowed_feature_vector import (  # type: ignore[attr-defined]
     FeatureValue,
     WindowedFeatureVectorEvent,
     WindowedFeatureVectorPayload,
@@ -98,6 +108,11 @@ _LOG_EVENT_DETECTOR_ERROR: Final[str] = "pipeline.detector_error"
 _LOG_EVENT_ALERT_ROUTER_ERROR = "alerts.router_error"
 _LOG_EVENT_WRITER_ERROR: Final[str] = "pipeline.writer_error"
 _LOG_EVENT_BATCH_SUMMARY: Final[str] = "pipeline.batch_summary"
+
+# Named for this component rather than left to BaseEvent's own
+# auto-injection, which defaults to "unknown" — indistinguishable
+# downstream from a producer that never named itself at all.
+_FEATURE_EVENT_SOURCE: Final[str] = "signal-forge.realtime_pipeline"
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +247,11 @@ def _bundle_feature_events(
                 ),
                 event_timestamp=first.window_end,
                 trace=trace,
+                metadata=EventMetadata(
+                    event_type=WindowedFeatureVectorEvent.__event_type__,
+                    schema_version=WindowedFeatureVectorEvent.__schema_version__,
+                    source=_FEATURE_EVENT_SOURCE,
+                ),
                 payload=payload,
             )
         )

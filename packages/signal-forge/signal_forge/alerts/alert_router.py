@@ -55,6 +55,7 @@ from event_schema_contracts.alerts.alert_event import (
     AlertEventPayload,
 )
 from event_schema_contracts.base.identity import derive
+from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection.detection_event import DetectionEvent
 
@@ -75,6 +76,11 @@ class AlertRouter:
 
     def __init__(self, acknowledgement_registry: AcknowledgementRegistry) -> None:
         self._acknowledgements = acknowledgement_registry
+
+    # Named for this component rather than left to BaseEvent's own
+    # auto-injection, which defaults to "unknown" — indistinguishable
+    # downstream from a producer that never named itself at all.
+    _SOURCE = "signal-forge.alert_router"
 
     def route(self, detections: Sequence[DetectionEvent]) -> list[AlertEvent]:
         """
@@ -120,5 +126,10 @@ class AlertRouter:
             event_id=derive("event.alert", str(alert_id)),
             event_timestamp=detection.event_timestamp,
             trace=TraceContext(trace_id=detection.trace.trace_id),
+            metadata=EventMetadata(
+                event_type=AlertEvent.__event_type__,
+                schema_version=AlertEvent.__schema_version__,
+                source=self._SOURCE,
+            ),
             payload=payload,
         )
