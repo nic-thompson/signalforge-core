@@ -159,17 +159,19 @@ The callers. Nothing polls the ingestion queue; nothing reads the archive. `sign
 
 The design question is settled by the architecture rather than by preference: the pipeline holds watermark and open-window state across `process_batch` calls, so its caller must be a long-running process rather than a function invocation. A Lambda would lose open windows on recycle, and windows would silently never close.
 
-### Phase 9 — A second producer
+### Phase 9 — A second producer: the store heartbeat
 
 The platform claim is currently untested. This repository consumes one event type from one producer, and "adding a source requires no change to the middle" is a property we believe from the design rather than from evidence.
 
-Customer call points are the natural first: a button press and its acknowledgement are two schemas, one producer, and a response-time metric that means something operationally. If the bus, archive, replay and audit machinery genuinely need no change, the claim holds. If they do, better to know.
+The store heartbeat is the first candidate, ahead of customer call points (see `signalforge-architecture.md` §1.1). Every 30 seconds, a store's Controller rolls the state of its ~25 devices into one payload and sends it upstream — a rollup, not a per-device ping, which is what keeps enterprise-scale ingestion to ~33 RPS rather than ~833. The schema is simpler than a call-point pair — no acknowledgement to correlate — and it gives the cross-site view its clearest win immediately: a store's heartbeat stopping means the site has gone dark, the one thing a store cannot report about itself. Store-level absence detection is the device-liveness pattern already built, one level up.
 
-Note that this producer is API-sourced rather than packet-sourced. It needs no reassembly, no framing, no protocol parsing — which makes it a much smaller component than `telemetry-parser`, and a fair test of whether the ingestion path generalises.
+If the bus, archive, replay and audit machinery genuinely need no change to carry this second schema, the platform claim holds. If they do, better to know now.
+
+Note that this producer is API-sourced rather than packet-sourced, like every producer from here on. It needs no reassembly, no framing, no protocol parsing — a much smaller component than `telemetry-parser`, and a fair test of whether the ingestion path generalises.
 
 ### Phase 10 — Widening the domain
 
-Shelf alerts, EPOS override requests, lone-worker alarms — each a schema and a producer following the pattern Phase 9 establishes. This is where the event vocabulary stops being about one protocol.
+Customer call points, shelf alerts, EPOS override requests, lone-worker alarms — each a schema and a producer following the pattern Phase 9 establishes. This is where the event vocabulary stops being about one protocol.
 
 ### Phase 11 — Warehouse
 

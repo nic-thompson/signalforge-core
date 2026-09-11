@@ -57,6 +57,42 @@ What needs the estate-wide view is comparison:
 
 This is why the roadmap places customer call points as the next producer. Response time to a fitting-room call, by site, is an operational KPI. Device liveness is infrastructure monitoring.
 
+### Traffic profile
+
+Figures below for a large store — roughly 25 staff on shift, 20 call points, automated shelf sensors — and the same numbers at 1,000-store scale.
+
+**Edge (per store).** DECT voice never leaves the site: 1–3 concurrent streams typically, 10–12 at peak (an announcement or emergency alert), ~1 Mbps local peak. This traffic is invisible to the cloud tier by design and stays that way.
+
+**Controller event triggers (per store).** Call points, shelf sensors and till-assistance requests: 30–60 events/hour steady state, peaking at roughly 0.5–1 request/second during lunch or evening rush. Small JSON payloads, well under 1 KB.
+
+**Cloud ingestion, at 1,000 stores:**
+
+| Metric | Per store | At 1,000 stores |
+|---|---|---|
+| Heartbeat | 1 / 30s (~0.033 RPS) | ~33 RPS continuous |
+| Event/alert ingestion | peak ~1 RPS | ~1,000 RPS peak |
+| Daily event volume | ~500/day | ~500,000/day |
+| Cloud bandwidth | <5 KB/s | ~5–10 MB/s aggregate |
+
+These are comfortably within what EventBridge and SQS handle without tuning. They do **not** revive the case for the stage-queue decomposition in Gap 2 — 1,000 RPS peak is well inside what a single process handles, so the queues remain unused because nothing needs the decomposition, not because the traffic is too small to justify building it.
+
+**Archive sizing is the number worth carrying forward.** 500,000 events/day into a 730-day retention is roughly 365 million events. At something near the size of a `sip.registration` envelope, that is on the order of hundreds of GB in the archive alone — the first genuinely non-trivial storage cost anywhere in this estate, and worth returning to before Phase 10 widens the event vocabulary.
+
+### The heartbeat is a rollup, not a ping
+
+The per-store heartbeat is not 25 devices independently reaching the cloud. The Controller polls its own headsets over DECT, holds their battery, signal and activity state locally, and every 30 seconds rolls all 25 into one structured JSON payload sent upstream. Direct per-device polling would be ~833 RPS at 1,000 stores; aggregation at the edge is what keeps it at ~33.
+
+This does not fit the shape every existing schema assumes. `sip.registration`, the detection events, the alert events — all describe one occurrence: one registration, one detection, one alert. The heartbeat describes a fleet's state at an instant, and the fact it reports is inseparable from the batching: "at this timestamp, this store's Controller saw these 25 devices in these states," observed and sent together.
+
+Two ways to represent that were considered:
+
+- **A store-level event carrying a device collection** — one event per publish, matching the wire shape exactly. A store that stops reporting is detected on the envelope alone, with no dependency on any device-level state.
+- **Fan out into 25 device-state events at ingestion** — restores the one-event-one-fact shape everything else has, but multiplies volume by 25 *inside* the system, reproducing at ingestion the exact fan-out the edge aggregation exists to avoid, and asserts 25 separately-observed facts that were in truth reported together.
+
+**Decided: the rollup stays a rollup.** A new schema — working name `store.heartbeat` — carries the store's identity, the observation instant, and a collection of device states. It is not built yet; this records the shape decided for it, ahead of the schema itself landing in `event-schema-contracts`.
+
+**This also reframes Phase 9.** A heartbeat is simpler than customer call points — no acknowledgement to correlate, no response-time computation — and it gives the cross-site view its clearest signal for free: a store's heartbeat stopping means the site has gone dark, which is the one thing a store cannot report about itself. Store-level absence detection is the same shape of problem `signal-forge`'s existing device-liveness detectors already solve, applied one level up. Worth doing before call points, not after.
+
 ---
 
 ## 2. Repositories
