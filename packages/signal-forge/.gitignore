@@ -37,3 +37,4 @@ coverage.xml
 # Local replay/dataset scratch space — never commit data
 scratch/
 local_outputs/.venv-sf/
+.venv-sf/
