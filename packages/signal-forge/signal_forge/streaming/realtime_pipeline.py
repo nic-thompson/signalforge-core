@@ -55,16 +55,7 @@ from event_schema_contracts.base.identity import derive
 from event_schema_contracts.base.metadata import EventMetadata
 from event_schema_contracts.base.trace import TraceContext
 from event_schema_contracts.detection import DetectionEvent
-
-# event_schema_contracts.features.windowed_feature_vector defines no
-# __all__, so mypy --strict's --no-implicit-reexport refuses this
-# import even though FeatureValue genuinely exists there and works
-# correctly at runtime — verified directly, not assumed. mypy attaches
-# the error to the "from ... import (" line itself, not to the
-# individual name, hence the ignore sitting here. The fix belongs in
-# event-schema-contracts (adding __all__), which is a separate
-# repository and a deliberate change of its own, not made here.
-from event_schema_contracts.features.windowed_feature_vector import (  # type: ignore[attr-defined]
+from event_schema_contracts.features import (
     FeatureValue,
     WindowedFeatureVectorEvent,
     WindowedFeatureVectorPayload,

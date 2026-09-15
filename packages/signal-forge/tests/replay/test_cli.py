@@ -33,6 +33,7 @@ from typing import Any
 
 from signal_forge.config.platform_settings import PlatformSettings
 from signal_forge.replay import __main__ as cli
+from signal_forge.streaming.realtime_pipeline import RealtimePipeline
 
 
 def _config(**settings: str) -> dict[str, Any]:
@@ -163,15 +164,35 @@ class MainTest(unittest.TestCase):
         self.assertEqual(ran, [])
 
 
-class DeferredProductionSeamsTest(unittest.TestCase):
+class DeferredEventSourceTest(unittest.TestCase):
     def test_production_event_source_is_deferred(self) -> None:
         with self.assertRaises(NotImplementedError):
             list(cli.build_event_source({"start_time": "x"}))
 
-    def test_production_pipeline_builder_is_deferred(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            cli._production_build_pipeline(PlatformSettings.from_env(env={}))
 
+class ProductionPipelineBuilderTest(unittest.TestCase):
+    """
+    _production_build_pipeline stopped being a stub: it now shares the
+    exact wiring aws-event-pipeline-infra's live ingestion consumer
+    uses, so run_replay's own documented invariant — "the same builder
+    constructs the live and replay pipelines" — is actually true rather
+    than aspirational. See the function's own docstring for why.
+    """
+
+    def test_builds_a_real_pipeline(self) -> None:
+        pipeline = cli._production_build_pipeline(PlatformSettings.from_env(env={}))
+        self.assertIsInstance(pipeline, RealtimePipeline)
+
+    def test_registers_an_offline_event_detector(self) -> None:
+        """
+        Not registering this would mean liveness detection silently
+        never fires — the exact failure mode this project has hit and
+        fixed before, once via a missing DeviceRegistry registration
+        and once via a missing metadata.source. A test that only checks
+        "does this raise" would not have caught either.
+        """
+        pipeline = cli._production_build_pipeline(PlatformSettings.from_env(env={}))
+        self.assertTrue(pipeline._event_detectors)
 
 if __name__ == "__main__":
     unittest.main()

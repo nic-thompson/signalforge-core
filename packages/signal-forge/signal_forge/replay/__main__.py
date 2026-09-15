@@ -64,9 +64,17 @@ from pathlib import Path
 from typing import Any
 
 from signal_forge.config.platform_settings import PlatformSettings
+from signal_forge.detection.detectors import OfflineDetector
+from signal_forge.detection.device_registry import DeviceRegistry
 from signal_forge.replay.driver import run_replay
 from signal_forge.streaming.event_protocol import TelemetryEvent
-from signal_forge.streaming.realtime_pipeline import ProcessingResult, RealtimePipeline
+from signal_forge.streaming.event_router import EventRouter
+from signal_forge.streaming.realtime_pipeline import (
+    ProcessingResult,
+    RealtimePipeline,
+    by_payload_field,
+)
+from signal_forge.streaming.watermark_manager import WatermarkManager
 
 EventSourceBuilder = Callable[[Mapping[str, Any]], Iterable[TelemetryEvent]]
 PipelineBuilder = Callable[[PlatformSettings], RealtimePipeline]
@@ -91,22 +99,83 @@ def build_event_source(window: Mapping[str, Any]) -> Iterable[TelemetryEvent]:
     )
 
 
+# The identity of DeviceRegistry's provisioning-schema registration.
+# Nothing currently emits this event type; registering it costs
+# nothing today and means this builder keeps working unmodified if
+# device provisioning ever does arrive on the bus. See
+# DeviceRegistry's own module docstring.
+DEVICE_REGISTRATION = ("device.registration", "v1")
+
+# The event type this builder actually wires DeviceRegistry against
+# today. See the class docstring below for why both are registered.
+SIP_REGISTRATION = ("sip.registration", "v1")
+
+
 def _production_build_pipeline(settings: PlatformSettings) -> RealtimePipeline:
     """
     The production pipeline builder — wires the full control plane.
 
-    Deferred to the same follow-up as the archive reader: the determinism
-    integration test (tests/replay/test_replay_determinism.py) defines the
-    builder that wires the dataset writer and projections, and that is the
-    builder a production CLI invocation would reference here. Stubbed now so
-    the CLI's parse-and-delegate surface is complete and testable with an
-    injected builder.
+    This is the one place SignalForge's actual analytics — which
+    detectors run, what they watch, how partitioning works — is
+    defined. Both the live ingestion consumer
+    (aws-event-pipeline-infra's scripts/consume_telemetry.py) and this
+    replay CLI call this same function, deliberately: run_replay's own
+    docstring states the invariant this exists to satisfy — "the same
+    builder constructs the live and replay pipelines; only the settings
+    differ... that property is what makes replay verifiable rather than
+    merely plausible." Two independently-written builders could only
+    ever agree by coincidence; one shared builder makes agreement
+    structural. This was previously a stub, which meant that invariant
+    had never actually been true in production.
+
+    Partitioning is by ``store_id``. That field is on every telemetry
+    payload in this system by construction — see telemetry-parser's
+    ADR-001 and event-schema-contracts' ADR-002 — so it partitions any
+    event type this builder might ever carry, not only sip.registration.
+
+    No aggregator is registered. ``OfflineDetector`` is an event
+    detector: it is driven directly from ``process()``'s per-event call
+    to every registered ``EventDetector``, not from window emissions, so
+    it needs no window — a window is the right tool for a rate or count
+    over time (the store-heartbeat rollup, once it exists), not for "has
+    this specific device gone quiet".
+
+    ``DeviceRegistry`` — the device-to-store projection
+    ``OfflineDetector.store_lookup`` depends on — is registered for both
+    ``device.registration`` (the schema its own module docstring names)
+    and ``sip.registration`` (what actually flows today). Registering
+    only the former would leave every device this builder ever sees
+    resolving to no store, and ``OfflineDetector`` silently skips
+    emission when a store cannot be resolved — a detector that runs
+    forever and never once fires, with no error anywhere.
     """
-    raise NotImplementedError(
-        "The production pipeline builder is deferred; inject one via "
-        "build_pipeline= (see tests/replay/test_replay_determinism.py for the "
-        "control-plane wiring)."
+
+    router = EventRouter()
+    watermarks = WatermarkManager(
+        lateness_tolerance_seconds=settings.late_event_tolerance_seconds
     )
+
+    pipeline = RealtimePipeline(
+        router=router,
+        watermark_manager=watermarks,
+        partition_extractor=by_payload_field("store_id"),
+    )
+
+    registry = DeviceRegistry()
+    router.register(*DEVICE_REGISTRATION, registry.observe_registration)
+    router.register(*SIP_REGISTRATION, registry.observe_registration)
+
+    pipeline.register_event_detector(
+        OfflineDetector(
+            threshold_seconds=settings.offline_threshold_seconds,
+            device_id_extractor=lambda event: getattr(
+                event.payload, "device_id", None
+            ),
+            store_lookup=registry.store_for,
+        )
+    )
+
+    return pipeline
 
 
 def run_from_config(

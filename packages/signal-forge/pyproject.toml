@@ -13,7 +13,7 @@ readme = "README.md"
 # bloating the analytics core.
 dependencies = [
     "pydantic>=2.7,<3",
-    "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.1",
+    "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.2",
     "structured-logging-python @ git+https://github.com/nic-thompson/structured-logging-python@main",
     "telemetry-parser @ git+https://github.com/nic-thompson/telemetry-parser@main",
 ]
