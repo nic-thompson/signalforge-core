@@ -7,7 +7,7 @@ authors = [
     { name = "Nicolas" }
 ]
 dependencies = [
-    "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.1",
+    "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.2",
 ]
 
 [project.optional-dependencies]
