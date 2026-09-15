@@ -12,6 +12,26 @@ first with an entry here.
 While the major version is 0, a breaking change bumps the minor. See
 docs/compatibility-policy.md for what counts as breaking.
 
+## 0.8.2 — 2026-09-15
+
+### Fixed
+
+- `event_schema_contracts.features` did not export `WindowedFeatureVectorEvent`
+  or `WindowedFeatureVectorPayload`, despite its own module docstring naming
+  both alongside `FeatureVectorEvent`. A consumer needing the windowed type had
+  no supported import path and was forced to reach into
+  `event_schema_contracts.features.windowed_feature_vector` directly — a leaf
+  module this library's own convention treats as private, everywhere else,
+  since every other package here exports its public surface from `__init__.py`
+  and nowhere else. Reaching past that boundary is exactly what
+  `--no-implicit-reexport` under `mypy --strict` exists to catch, and
+  `signal-forge` did trip it, carrying a `# type: ignore[attr-defined]` to
+  paper over an import path that was never meant to be public. Both names are
+  now exported from `event_schema_contracts.features` alongside
+  `FeatureValue`, which was already there. The ignore comment in `signal-forge`
+  is removed in the same change that adopts this release, not before — it
+  would be a lie prior to this version existing.
+
 ## 0.8.1 — 2026-08-29
 
 ### Fixed
