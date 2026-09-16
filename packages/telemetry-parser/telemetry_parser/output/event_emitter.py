@@ -1,0 +1,71 @@
+from typing import Callable
+from uuid import UUID
+
+from event_schema_contracts.telemetry.sip_registration_event import (
+    SipRegistrationEvent,
+)
+
+from telemetry_parser.observability.parser_observer import ParserObserver
+
+
+class EventEmitter:
+    """
+    Emits structured telemetry events in streaming-safe format.
+
+    Supports:
+    - iterator-based pipelines
+    - replay workflows
+    - analytics ingestion
+    - dataset regeneration
+    - structured logging integration (future)
+    """
+
+    def __init__(
+        self,
+        on_emit=None,
+        observer: ParserObserver | None = None,
+        preserve_event_ids: bool = False,
+        id_provider: Callable[[], UUID] | None = None,
+    ) -> None:
+        """
+        Parameters
+        ----------
+        preserve_event_ids:
+            Ensures event identifiers remain stable during replay or dataset regeneration.
+
+        id_provider:
+            Optional deterministic ID provider used when generating replacement event IDs.
+        """
+
+        self.preserve_event_ids = preserve_event_ids
+        self.id_provider = id_provider
+        self.on_emit = on_emit
+        self.observer = observer
+
+    def emit(
+        self,
+        event: SipRegistrationEvent,
+    ) -> SipRegistrationEvent:
+        """
+        Emits a structured telemetry event.
+
+        Behaviour depends on replay configuration:
+
+        - If preserve_event_ids=True → event IDs remain unchanged
+        - If preserve_event_ids=False and id_provider supplied → deterministic IDs injected
+        - Otherwise → event emitted unchanged
+        """
+
+        if not self.preserve_event_ids and self.id_provider is not None:
+            event = event.model_copy(update={"event_id": self.id_provider()})
+
+        if self.on_emit:
+            self.on_emit(event)
+
+        if hasattr(self, "observer") and self.observer:
+            self.observer.on_event_emitted(
+                event.metadata.event_type,
+                str(event.event_id),
+            )
+
+        return event
