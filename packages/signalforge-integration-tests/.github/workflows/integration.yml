@@ -1,0 +1,268 @@
+# Cross-repo integration tests for SignalForge.
+#
+# Four triggers, each closing a different staleness hole:
+#
+#   push / pull_request  — changes to the tests themselves
+#   repository_dispatch  — a component repo went green; re-verify the
+#                          seams against its new commit (see
+#                          docs/wiring-component-repos.md)
+#   schedule             — nightly backstop, in case a dispatch fails
+#                          to fire or a repo isn't wired up yet
+#   workflow_dispatch    — manual run, with an optional ref override
+#
+# Without the dispatch and schedule triggers this suite would only run
+# when someone edits the tests — which is exactly how cross-repo
+# integration suites quietly stop providing value.
+
+name: integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  repository_dispatch:
+    types: [component-updated]
+  schedule:
+    # 06:00 UTC daily — before the working day, so drift introduced
+    # yesterday is visible this morning.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      telemetry_parser_ref:
+        description: "Ref of telemetry-parser to test against"
+        required: false
+        default: "main"
+      structured_logging_ref:
+        description: "Ref of structured-logging-python to test against"
+        required: false
+        default: "main"
+      greengrass_publisher_ref:
+        description: "Ref of greengrass-publisher to test against"
+        required: false
+        default: "main"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  edge-chain:
+    name: Edge chain (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Resolve component refs
+        id: refs
+        env:
+          # repository_dispatch payload wins when present, then a manual
+          # workflow_dispatch input, then main. Written as a single step
+          # so the resolution rules live in one place rather than being
+          # repeated across three checkout steps.
+          DISPATCH_REPO: ${{ github.event.client_payload.repository }}
+          DISPATCH_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          tp="${{ github.event.inputs.telemetry_parser_ref || 'main' }}"
+          sl="${{ github.event.inputs.structured_logging_ref || 'main' }}"
+          gp="${{ github.event.inputs.greengrass_publisher_ref || 'main' }}"
+
+          # If a component repo dispatched this run, pin that one repo to
+          # the exact commit that triggered it. The others stay on main.
+          case "$DISPATCH_REPO" in
+            */telemetry-parser)        tp="$DISPATCH_SHA" ;;
+            */structured-logging-python) sl="$DISPATCH_SHA" ;;
+            */greengrass-publisher)    gp="$DISPATCH_SHA" ;;
+          esac
+
+          echo "telemetry_parser=$tp" >> "$GITHUB_OUTPUT"
+          echo "structured_logging=$sl" >> "$GITHUB_OUTPUT"
+          echo "greengrass_publisher=$gp" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Component refs under test"
+            echo ""
+            echo "| Repo | Ref |"
+            echo "| --- | --- |"
+            echo "| telemetry-parser | \`$tp\` |"
+            echo "| structured-logging-python | \`$sl\` |"
+            echo "| greengrass-publisher | \`$gp\` |"
+            if [ -n "$DISPATCH_REPO" ]; then
+              echo ""
+              echo "Triggered by \`$DISPATCH_REPO\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # No token on any of the three component checkouts. All are public,
+      # so actions/checkout's default token suffices.
+      #
+      # They were private, and each checkout passed
+      # token: ${{ secrets.COMPONENT_REPO_TOKEN }} — a secret that was
+      # never configured. An unset secret is not an absent input: it
+      # resolves to an empty string, and checkout rejects that with
+      # "Input required and not supplied: token". That is why this
+      # workflow failed on its first run on 21 August and every scheduled
+      # run since, reporting a setup error each morning while real
+      # breakage accumulated behind it unseen.
+      - name: Checkout integration tests
+        uses: actions/checkout@v5
+        with:
+          path: integration
+
+      - name: Checkout telemetry-parser
+        uses: actions/checkout@v5
+        with:
+          repository: nic-thompson/telemetry-parser
+          ref: ${{ steps.refs.outputs.telemetry_parser }}
+          path: telemetry-parser
+
+      - name: Checkout structured-logging-python
+        uses: actions/checkout@v5
+        with:
+          repository: nic-thompson/structured-logging-python
+          ref: ${{ steps.refs.outputs.structured_logging }}
+          path: structured-logging-python
+
+      - name: Checkout greengrass-publisher
+        uses: actions/checkout@v5
+        with:
+          repository: nic-thompson/greengrass-publisher
+          ref: ${{ steps.refs.outputs.greengrass_publisher }}
+          path: greengrass-publisher
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # Installed rather than joined onto PYTHONPATH. greengrass-publisher
+      # now declares event-schema-contracts as a dependency, which a
+      # PYTHONPATH entry would not bring in — the imports would resolve for
+      # the checked-out packages and fail for what they depend on. Installing
+      # the local checkouts keeps the ref-pinning above meaningful while
+      # letting pip resolve everything beneath them.
+      - name: Install components under test
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install ./telemetry-parser
+          python -m pip install ./structured-logging-python
+          python -m pip install ./greengrass-publisher
+
+      - name: Run edge-chain integration tests
+        working-directory: integration
+        run: pytest -v --tb=short
+
+  notify-on-scheduled-failure:
+    # A failing nightly run is easy to miss — a PR failure is visible to
+    # whoever opened it, but nobody owns a cron. Opening an issue makes
+    # the failure something that has to be actively closed.
+    name: Open issue on nightly failure
+    needs: edge-chain
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Create failure issue
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = "Nightly integration tests failing";
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "nightly-failure",
+            });
+
+            const body = [
+              "The scheduled cross-repo integration run failed.",
+              "",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "This usually means a component repo changed in a way that",
+              "broke a seam — the kind of drift this suite exists to catch.",
+            ].join("\n");
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["nightly-failure"],
+              });
+            }
+
+  close-issue-on-scheduled-success:
+    # The other half of the notification. Opening an issue on failure
+    # makes a broken nightly something that has to be actively closed —
+    # but nothing closed it on recovery, so the issue outlived the
+    # failure and had to be closed by hand. An alert that stays lit after
+    # the problem is fixed stops being an alert.
+    name: Close issue on nightly recovery
+    needs: edge-chain
+    if: success() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Close any open failure issue
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "nightly-failure",
+            });
+
+            if (open.data.length === 0) {
+              core.info("No open nightly-failure issue; nothing to close.");
+              return;
+            }
+
+            const body = [
+              "The scheduled cross-repo integration run passed.",
+              "",
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "Closing automatically. If this reopens tomorrow the",
+              "underlying break was not fixed, only intermittent.",
+            ].join("\n");
+
+            // Every matching issue, not just the first. The failure job
+            // comments on an existing one rather than opening a second,
+            // so there should only ever be one — but closing all of them
+            // costs nothing and does not depend on that holding.
+            for (const issue of open.data) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body,
+              });
+
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: "closed",
+                state_reason: "completed",
+              });
+
+              core.info(`Closed #${issue.number}.`);
+            }
