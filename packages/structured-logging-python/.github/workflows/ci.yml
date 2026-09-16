@@ -1,0 +1,71 @@
+# CI workflow for structured-logging-python
+#
+# Two jobs: typecheck (mypy --strict) and test (pytest matrix over Python
+# 3.11 and 3.12).
+#
+# The typecheck job was the follow-up this file said was coming. The
+# backlog it referred to was nineteen errors, mostly missing annotations
+# in the adapters, and it was invisible because nothing ran mypy — the
+# package shipped a py.typed marker in September 2026 without ever having
+# been checked, so consumers were told to trust annotations nobody had
+# verified.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: mypy --strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # The full dev extra rather than mypy alone: the adapters import
+      # fastapi and starlette, and without them mypy reports missing
+      # imports rather than checking the code that uses them.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: mypy
+        run: mypy --strict structured_logging
+
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest -v

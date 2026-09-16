@@ -1,0 +1,41 @@
+[project]
+name = "structured-logging-python"
+version = "0.1.0"
+description = "Structured logging primitives for distributed ML telemetry pipelines"
+requires-python = ">=3.10"
+
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "mypy>=1.10",
+  "fastapi",
+  # Imported directly by tests/trace/test_trace_context.py via
+  # @pytest.mark.anyio. It arrived transitively through fastapi until now,
+  # which meant the test suite depended on something it never declared —
+  # working by accident rather than by arrangement.
+  "anyio",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# PEP 561. Without py.typed in the installed package, mypy tells a
+# consumer this library has no type information and every import from it
+# fails as import-untyped. greengrass-publisher hit exactly that.
+#
+# The marker makes the annotations available to consumers, and mypy does
+# not report this package's own errors in a consumer's run — that was
+# verified rather than assumed.
+#
+# When the marker was added the package had never been typechecked and
+# `mypy --strict` reported nineteen errors, so it advertised types nobody
+# had verified. That backlog is now cleared and the typecheck runs in CI,
+# which is what makes the marker a claim rather than an assertion.
+[tool.setuptools.package-data]
+structured_logging = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
