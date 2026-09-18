@@ -1,0 +1,46 @@
+[project]
+name = "signalforge-core"
+version = "0.0.0"
+description = "SignalForge's four co-released cloud packages: event schemas, telemetry parsing, structured logging, and the analytics/detection/replay control plane."
+requires-python = ">=3.11"
+dependencies = [
+    "event-schema-contracts",
+    "telemetry-parser",
+    "structured-logging-python",
+    "signal-forge",
+]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+event-schema-contracts = { workspace = true }
+telemetry-parser = { workspace = true }
+structured-logging-python = { workspace = true }
+signal-forge = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "mypy>=1.10",
+    "structured-logging-python[dev]",
+    "signal-forge[dev,datasets,dashboards]",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "pyarrow.*"
+follow_imports = "skip"
