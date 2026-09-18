@@ -22,7 +22,7 @@ class EventEmitter:
 
     def __init__(
         self,
-        on_emit=None,
+        on_emit: Callable[[SipRegistrationEvent], None] | None = None,
         observer: ParserObserver | None = None,
         preserve_event_ids: bool = False,
         id_provider: Callable[[], UUID] | None = None,
