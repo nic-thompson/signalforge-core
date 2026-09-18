@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest (py${{ matrix.python-version }}, ${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        package:
+          - event-schema-contracts
+          - telemetry-parser
+          - structured-logging-python
+          - signal-forge
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync workspace
+        run: uv sync --group dev
+
+      - name: Run tests
+        run: uv run pytest packages/${{ matrix.package }}/tests -q
+
+  typecheck:
+    name: mypy --strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.11"
+
+      - name: Sync workspace
+        run: uv sync --group dev
+
+      # Run once, across all four packages together — mypy's own
+      # module-graph handling has no analogue to pytest's namespace
+      # collision, since it resolves imports by qualified name rather
+      # than by importing test modules into a shared "tests" package.
+      - name: mypy
+        run: |
+          uv run mypy \
+            packages/event-schema-contracts/event_schema_contracts \
+            packages/telemetry-parser/telemetry_parser \
+            packages/structured-logging-python/structured_logging \
+            packages/signal-forge/signal_forge
