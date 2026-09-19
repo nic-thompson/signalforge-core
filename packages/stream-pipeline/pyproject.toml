@@ -13,7 +13,7 @@ readme = "README.md"
 # bloating the analytics core.
 dependencies = [
     "pydantic>=2.7,<3",
-    "event-schema-contracts @ git+https://github.com/nic-thompson/signalforge-core@v0.2.0#subdirectory=packages/event-schema-contracts",
+    "event-schema-contracts @ git+https://github.com/nic-thompson/signalforge-core@main#subdirectory=packages/event-schema-contracts",
     "structured-logging-python @ git+https://github.com/nic-thompson/structured-logging-python@main",
     "telemetry-parser @ git+https://github.com/nic-thompson/telemetry-parser@main",
 ]
