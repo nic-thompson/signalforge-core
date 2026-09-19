@@ -13,7 +13,7 @@ event-schema-contracts
         ↓
 telemetry-parser
         ↓
-signal-forge
+stream-pipeline
         ↓
 dataset export + replay
 ```

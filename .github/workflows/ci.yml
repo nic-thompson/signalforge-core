@@ -22,7 +22,7 @@ jobs:
           - event-schema-contracts
           - telemetry-parser
           - structured-logging-python
-          - signal-forge
+          - stream-pipeline
     steps:
       - uses: actions/checkout@v5
 
@@ -61,4 +61,4 @@ jobs:
             packages/event-schema-contracts/event_schema_contracts \
             packages/telemetry-parser/telemetry_parser \
             packages/structured-logging-python/structured_logging \
-            packages/signal-forge/signal_forge
+            packages/stream-pipeline/stream_pipeline

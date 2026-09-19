@@ -2,7 +2,7 @@
 detection_event.py
 
 Canonical schema for detection events emitted by the analytics control
-plane (e.g. signal-forge) when a monitored condition is identified.
+plane (e.g. stream-pipeline) when a monitored condition is identified.
 
 This contract uses the **discriminator pattern**: a single schema covers
 every detection type, distinguished by ``detection_type``. Detector-
@@ -54,7 +54,7 @@ class DetectionEventPayload(DomainEventPayload):
     identifies which detector emitted the event and what structure the
     ``details`` field carries. Conventional values follow a
     ``<domain>.<state>`` shape; see the consuming repository
-    (signal-forge) for canonical constants.
+    (stream-pipeline) for canonical constants.
 
     Examples:
 

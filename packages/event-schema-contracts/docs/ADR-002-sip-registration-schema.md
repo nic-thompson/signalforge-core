@@ -56,14 +56,14 @@ This directly contradicts `BaseEvent`'s own documented rationale: *"an unrecogni
 - The parser's output has a valid target schema, unblocking the ingestion path.
 - `device.registration` and `sip.registration` are now unambiguously separate identities. The parser must be updated to emit the new `event_type`; until then it emits an identity whose registered schema rejects its payload.
 - All payloads across the library now reject unknown fields. The full suite (224 existing tests plus 37 new) passes unchanged, and nothing currently produces events, so this correction is free today and would not be later.
-- `signal-forge` is unaffected: its `TelemetryEvent` protocol declares `payload: Any` and its detectors take a `device_id_extractor` callable, so payload shape is not constrained downstream.
+- `stream-pipeline` is unaffected: its `TelemetryEvent` protocol declares `payload: Any` and its detectors take a `device_id_extractor` callable, so payload shape is not constrained downstream.
 - Adding `RegistrationStatus` values later remains possible without a major bump, but consumers must treat an unrecognised value as "not currently registered" rather than matching exhaustively.
 
 ## A related finding, not addressed here
 
-`signal_forge.streaming.event_protocol` states that events reaching the streaming layer have *"already been validated by `telemetry-parser` against the schemas in `event-schema-contracts`"*, and skips re-validation on that basis. This is untrue: `telemetry-parser` does not import `event-schema-contracts` at all. No validation boundary currently exists anywhere in the pipeline.
+`stream_pipeline.streaming.event_protocol` states that events reaching the streaming layer have *"already been validated by `telemetry-parser` against the schemas in `event-schema-contracts`"*, and skips re-validation on that basis. This is untrue: `telemetry-parser` does not import `event-schema-contracts` at all. No validation boundary currently exists anywhere in the pipeline.
 
-The planned ingestion Lambda should become that boundary, which makes the claim true rather than aspirational. Until it exists, `signal-forge`'s decision to skip validation rests on a guarantee nothing provides.
+The planned ingestion Lambda should become that boundary, which makes the claim true rather than aspirational. Until it exists, `stream-pipeline`'s decision to skip validation rests on a guarantee nothing provides.
 
 ---
 

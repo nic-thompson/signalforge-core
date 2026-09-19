@@ -161,7 +161,7 @@ Not enforced here:
   envelope. This library validates whatever is constructed from it; it cannot
   make a service construct one. `telemetry-parser` began doing so in August 2026,
   which is what made the guarantee real for the telemetry domain — before that,
-  `signal_forge.streaming.event_protocol` documented a validation step that no
+  `stream_pipeline.streaming.event_protocol` documented a validation step that no
   component performed.
 - **Replay safety** is permitted rather than guaranteed. The schemas allow
   derived UUIDv5 identifiers and carry observation time, which is what makes a

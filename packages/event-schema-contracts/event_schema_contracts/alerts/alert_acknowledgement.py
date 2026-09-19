@@ -5,7 +5,7 @@ Canonical schema for alert acknowledgement events — a human (or an
 automated responder acting for one) acknowledging a routed alert.
 
 Acknowledgements ride the event stream so that acknowledgement *state*
-is a replay-deterministic projection: a consumer (e.g. signal-forge's
+is a replay-deterministic projection: a consumer (e.g. stream-pipeline's
 Phase 5 AcknowledgementRegistry) subscribes to this event type through
 the same router every other consumer uses and reconstructs identical
 ack state from the same ordered input. This is why an ack is modelled as

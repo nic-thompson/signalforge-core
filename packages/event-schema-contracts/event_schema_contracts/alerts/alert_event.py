@@ -2,7 +2,7 @@
 alert_event.py
 
 Canonical schema for routed alert events emitted by the analytics
-control plane's alert-routing layer (e.g. signal-forge Phase 5) when a
+control plane's alert-routing layer (e.g. stream-pipeline Phase 5) when a
 detection is turned into an alert destined for an operational sink
 (EventBridge, SNS, and conceptually Slack / PagerDuty).
 

@@ -43,7 +43,7 @@ class EventNormaliser:
     # re-bases every event id this parser has ever produced, and a replay
     # would then disagree with the run it is meant to reproduce.
     #
-    # Named for the event rather than the payload, matching signal-forge's
+    # Named for the event rather than the payload, matching stream-pipeline's
     # "event.detection" and "event.alert" — an envelope's id and the id of
     # the thing it carries are different records built from overlapping
     # coordinates, and the role is what keeps them from colliding.

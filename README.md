@@ -8,7 +8,7 @@ as a single [uv](https://docs.astral.sh/uv/) workspace.
 | [`event-schema-contracts`](packages/event-schema-contracts/) | Canonical telemetry event schema contracts |
 | [`telemetry-parser`](packages/telemetry-parser/) | Parses raw TCP packet streams into validated events |
 | [`structured-logging-python`](packages/structured-logging-python/) | Structured JSON logging and trace propagation |
-| [`signal-forge`](packages/signal-forge/) | Analytics, detection, replay and dataset control plane |
+| [`stream-pipeline`](packages/stream-pipeline/) | Analytics, detection, replay and dataset control plane |
 
 Each package keeps its own `pyproject.toml`, version, and test suite —
 see its own README for details. What the workspace adds is that they
@@ -21,13 +21,13 @@ Each one pinned the others by git tag (`event-schema-contracts @
 git+...@v0.8.2`), and those pins repeatedly went stale relative to one
 another — a change merged in one repo would not reach a sibling until
 someone remembered to bump a pin and cut a new tag, discovered only
-when a later, unrelated change failed to install. `signal_forge`'s
+when a later, unrelated change failed to install. `stream_pipeline`'s
 `_production_build_pipeline` depending on a specific
 `event-schema-contracts` export is a representative case: the export
 was added, tagged, and still took three further pin bumps across two
 more repos before everything agreed.
 
-Inside this workspace, `signal-forge` depending on
+Inside this workspace, `stream-pipeline` depending on
 `event-schema-contracts` resolves to `packages/event-schema-contracts`
 directly. A change to one is visible to the others in the same commit,
 the same pull request, the same CI run. There is no tag to go stale,
@@ -52,7 +52,7 @@ because there is nothing to pin.
 ```bash
 uv sync --group dev
 uv run pytest packages/event-schema-contracts/tests -q
-uv run mypy packages/signal-forge/signal_forge
+uv run mypy packages/stream-pipeline/stream_pipeline
 ```
 
 Run each package's tests separately, not as one combined

@@ -7,7 +7,7 @@ dependencies = [
     "event-schema-contracts",
     "telemetry-parser",
     "structured-logging-python",
-    "signal-forge",
+    "stream-pipeline",
 ]
 
 [tool.uv.workspace]
@@ -17,14 +17,14 @@ members = ["packages/*"]
 event-schema-contracts = { workspace = true }
 telemetry-parser = { workspace = true }
 structured-logging-python = { workspace = true }
-signal-forge = { workspace = true }
+stream-pipeline = { workspace = true }
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "mypy>=1.10",
     "structured-logging-python[dev]",
-    "signal-forge[dev,datasets,dashboards]",
+    "stream-pipeline[dev,datasets,dashboards]",
 ]
 
 [build-system]
