@@ -1,5 +1,5 @@
 [project]
-name = "signalforge-core"
+name = "signal-forge"
 version = "0.0.0"
 description = "SignalForge's four co-released cloud packages: event schemas, telemetry parsing, structured logging, and the analytics/detection/replay control plane."
 requires-python = ">=3.11"

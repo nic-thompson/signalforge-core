@@ -19,7 +19,7 @@ resolution-markers = [
 [manifest]
 members = [
     "event-schema-contracts",
-    "signalforge-core",
+    "signal-forge",
     "stream-pipeline",
     "structured-logging-python",
     "telemetry-parser",
@@ -1606,7 +1606,7 @@ wheels = [
 ]
 
 [[package]]
-name = "signalforge-core"
+name = "signal-forge"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [

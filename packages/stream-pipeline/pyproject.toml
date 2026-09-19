@@ -13,9 +13,9 @@ readme = "README.md"
 # bloating the analytics core.
 dependencies = [
     "pydantic>=2.7,<3",
-    "event-schema-contracts @ git+https://github.com/nic-thompson/signalforge-core@main#subdirectory=packages/event-schema-contracts",
-    "structured-logging-python @ git+https://github.com/nic-thompson/signalforge-core@main#subdirectory=packages/structured-logging-python",
-    "telemetry-parser @ git+https://github.com/nic-thompson/signalforge-core@main#subdirectory=packages/telemetry-parser",
+    "event-schema-contracts @ git+https://github.com/nic-thompson/signal-forge@main#subdirectory=packages/event-schema-contracts",
+    "structured-logging-python @ git+https://github.com/nic-thompson/signal-forge@main#subdirectory=packages/structured-logging-python",
+    "telemetry-parser @ git+https://github.com/nic-thompson/signal-forge@main#subdirectory=packages/telemetry-parser",
 ]
 
 [project.optional-dependencies]

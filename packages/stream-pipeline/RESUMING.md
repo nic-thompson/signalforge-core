@@ -9,7 +9,7 @@ headset fleet. **`stream-pipeline`** — this package, at
 `packages/stream-pipeline/` — is its analytics control plane: detection,
 alerting, dashboard projections, dataset export, and replay.
 
-It is one of four packages inside **`signalforge-core`**, a `uv` workspace
+It is one of four packages inside **`signal-forge`**, a `uv` workspace
 monorepo (not a standalone repository). The repository itself is named
 `signal-forge`; the package inside it is `stream-pipeline`, deliberately
 distinct, so a reader can always tell whether something refers to the
@@ -34,12 +34,12 @@ That should rebuild context in 20–30 minutes of reading.
 
 ## Then verify your environment
 
-This package lives inside the `signalforge-core` workspace root, not in
+This package lives inside the `signal-forge` workspace root, not in
 its own standalone virtualenv — `uv sync` at the workspace root installs
 all four packages together.
 
 ```bash
-cd ~/Code/signalforge-core    # the monorepo root, not this package's own directory
+cd ~/Code/signal-forge    # the monorepo root, not this package's own directory
 uv sync --group dev
 
 git status
@@ -86,10 +86,10 @@ A few specific patterns that have proven valuable:
 
 ## Repository layout
 
-This package's own layout, inside the larger `signalforge-core` workspace:
+This package's own layout, inside the larger `signal-forge` workspace:
 
 ```
-signalforge-core/                     # the monorepo root
+signal-forge/                     # the monorepo root
 ├── .github/workflows/ci.yml          # CI for all four packages: pytest matrix per package, unified mypy
 ├── pyproject.toml                    # workspace definition, [tool.uv.sources], shared dev dependency group
 ├── packages/
@@ -132,11 +132,11 @@ in the same `uv sync`.
 `aws-event-pipeline-infra` is not part of the workspace — it is a
 separate, private repository (real AWS account details, not suitable
 for a public monorepo) that consumes this workspace's packages by
-pinning a `signalforge-core` git tag, the same way any external
+pinning a `signal-forge` git tag, the same way any external
 consumer would. It is referenced in `docs/replay-workflows.md` but is
 not a Python dependency of this package.
 
-When `signalforge-core` needs a new tag to reflect a change here (for
+When `signal-forge` needs a new tag to reflect a change here (for
 `aws-event-pipeline-infra` or any other external consumer to pick up),
 that is a deliberate, separate step — not something that happens
 automatically on every commit to this package.

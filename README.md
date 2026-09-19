@@ -1,4 +1,4 @@
-# signalforge-core
+# signal-forge
 
 The four co-released cloud packages of the SignalForge telemetry platform,
 as a single [uv](https://docs.astral.sh/uv/) workspace.
