@@ -7,7 +7,7 @@ authors = [
     { name = "Nicolas" }
 ]
 dependencies = [
-    "event-schema-contracts @ git+https://github.com/nic-thompson/event-schema-contracts@v0.8.2",
+    "event-schema-contracts @ git+https://github.com/nic-thompson/signalforge-core@v0.2.0#subdirectory=packages/event-schema-contracts",
 ]
 
 [project.optional-dependencies]
