@@ -180,6 +180,8 @@ v1.0.0, all seven phases complete. 384 tests; ruff and mypy `--strict` clean acr
 
 **Shape of the fix:** a Greengrass component using libpcap (via `scapy` or a lower-level binding) that captures SIP traffic on the controller's interface and feeds `TCPPacket` objects into `ParserPipeline` in-process.
 
+**Open question this raises, not yet resolved:** this shape of the fix assumes the Controller captures raw SIP packets and feeds them to `ParserPipeline` in-process — i.e. that `telemetry-parser`'s TCP-reassembly and SIP-extraction logic runs on the edge. That assumption was never verified against how a real Controller actually gets telemetry to the cloud. Gap 3 already names the intended transport as IoT rule → Lambda → `PutEvents`, implying MQTT, not raw TCP, is what crosses the network boundary — but says nothing about what's inside the MQTT payload. If the Controller parses SIP locally and publishes an already-structured event over MQTT, `ParserPipeline` belongs on the Controller, not the "central-side ingestion consumer" of Gap 2 — and `telemetry-parser`'s cloud-side role would shrink to validating and re-emitting what the Controller already parsed, not reconstructing packets from bytes. Neither shape has been decided; this is not yet a design decision, only the fact that one is owed.
+
 ### Gap 2 — Central-side ingestion consumer (partly closed; the remainder is Phase 8)
 **The translation half is closed.** `telemetry-parser` now depends on `event-schema-contracts` and emits validated `SipRegistrationEvent` directly. `StructuredEvent` was deleted. There is no translation step because there is nothing left to translate — the parser constructs the contract types, so the schema validates its output at the point of production.
 
